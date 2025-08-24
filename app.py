@@ -1,418 +1,589 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.metrics.pairwise import cosine_similarity
+import json
 import re
-from typing import List, Tuple, Dict
+import random
 import os
-
-# 追加: 埋め込みと日本語トークナイズ
-try:
-    from sentence_transformers import SentenceTransformer
-    _EMBED_AVAILABLE = True
-except Exception:
-    _EMBED_AVAILABLE = False
-
-try:
-    from janome.tokenizer import Tokenizer as JanomeTokenizer
-    _JANOME_AVAILABLE = True
-except Exception:
-    _JANOME_AVAILABLE = False
+from typing import Dict, List, Optional, Tuple
+from collections import Counter
+import math
+import time
+import requests
 
 # 設定
 st.set_page_config(
-    page_title="大谷翔平 AI Chat - 3層段階RAGシステム",
+    page_title="大谷翔平 AI Chat - 高速版",
     page_icon="⚾",
     layout="wide"
 )
 
-# 日本語トークナイズ（Janomeがあれば利用）
-def tokenize_ja(text: str) -> List[str]:
-    if not isinstance(text, str):
-        return []
-    if _JANOME_AVAILABLE:
-        t = JanomeTokenizer()
-        return [token.surface for token in t.tokenize(text)]
-    # フォールバック: 簡易分割
-    return re.findall(r"\w+|[\u3040-\u30ff\u4e00-\u9fff]+", text)
+# 軽量テキスト検索クラス（scikit-learn不要）
+class LightweightTextSearch:
+    """軽量TF-IDF検索システム"""
+    
+    def __init__(self, texts: List[str], max_features: int = 2000):
+        self.texts = texts
+        self.max_features = max_features
+        self.vocab = self._build_vocabulary()
+        self.idf_vector = self._compute_idf()
+    
+    def _tokenize(self, text: str) -> List[str]:
+        """日本語対応トークナイズ"""
+        if not isinstance(text, str):
+            return []
+        tokens = re.findall(r'[\w\u3040-\u309f\u30a0-\u30ff\u4e00-\u9fff]+', text.lower())
+        return [token for token in tokens if len(token) > 1]
+    
+    def _build_vocabulary(self) -> Dict[str, int]:
+        """語彙辞書構築"""
+        all_tokens = []
+        for text in self.texts:
+            all_tokens.extend(self._tokenize(text))
+        
+        token_counts = Counter(all_tokens)
+        top_tokens = [token for token, count in token_counts.most_common(self.max_features)]
+        
+        return {token: idx for idx, token in enumerate(top_tokens)}
+    
+    def _compute_tf(self, tokens: List[str]) -> np.ndarray:
+        """TF計算"""
+        tf_vector = np.zeros(len(self.vocab))
+        if not tokens:
+            return tf_vector
+            
+        token_counts = Counter(tokens)
+        total_tokens = len(tokens)
+        
+        for token, count in token_counts.items():
+            if token in self.vocab:
+                tf_vector[self.vocab[token]] = count / total_tokens
+        
+        return tf_vector
+    
+    def _compute_idf(self) -> np.ndarray:
+        """IDF計算"""
+        idf_vector = np.zeros(len(self.vocab))
+        num_docs = len(self.texts)
+        
+        for token, token_idx in self.vocab.items():
+            doc_count = sum(1 for text in self.texts if token in self._tokenize(text))
+            if doc_count > 0:
+                idf_vector[token_idx] = math.log(num_docs / doc_count)
+        
+        return idf_vector
+    
+    def _text_to_tfidf(self, text: str) -> np.ndarray:
+        """テキストをTF-IDFベクトルに変換"""
+        tokens = self._tokenize(text)
+        tf_vector = self._compute_tf(tokens)
+        return tf_vector * self.idf_vector
+    
+    def cosine_similarity(self, vec1: np.ndarray, vec2: np.ndarray) -> float:
+        """コサイン類似度"""
+        dot_product = np.dot(vec1, vec2)
+        norm1 = np.linalg.norm(vec1)
+        norm2 = np.linalg.norm(vec2)
+        
+        if norm1 == 0 or norm2 == 0:
+            return 0.0
+        
+        return dot_product / (norm1 * norm2)
+    
+    def search(self, query: str, top_k: int = 5) -> List[Tuple[int, float]]:
+        """類似テキスト検索"""
+        query_tfidf = self._text_to_tfidf(query)
+        similarities = []
+        
+        for i, text in enumerate(self.texts):
+            text_tfidf = self._text_to_tfidf(text)
+            similarity = self.cosine_similarity(query_tfidf, text_tfidf)
+            similarities.append((i, similarity))
+        
+        similarities.sort(key=lambda x: x[1], reverse=True)
+        return similarities[:top_k]
 
-# MMR (Maximal Marginal Relevance) 実装
-def mmr(query_vec: np.ndarray, doc_vecs: np.ndarray, top_k: int = 5, lambda_mult: float = 0.5) -> List[int]:
-    selected = []
-    sim_to_query = cosine_similarity(query_vec.reshape(1, -1), doc_vecs)[0]
-    candidates = list(range(len(doc_vecs)))
-    if len(candidates) == 0:
-        return []
+# 超軽量キーワード検索
+class KeywordSearch:
+    """軽量キーワードマッチング検索"""
+    
+    def __init__(self, texts: List[str]):
+        self.texts = texts
+        self.keyword_index = self._build_index()
+    
+    def _tokenize(self, text: str) -> List[str]:
+        if not isinstance(text, str):
+            return []
+        return re.findall(r'[\w\u3040-\u309f\u30a0-\u30ff\u4e00-\u9fff]+', text.lower())
+    
+    def _build_index(self) -> Dict[str, List[int]]:
+        index = {}
+        for doc_id, text in enumerate(self.texts):
+            tokens = self._tokenize(text)
+            for token in set(tokens):
+                if len(token) > 1:
+                    if token not in index:
+                        index[token] = []
+                    index[token].append(doc_id)
+        return index
+    
+    def search(self, query: str, top_k: int = 5) -> List[Tuple[int, float]]:
+        query_tokens = set(self._tokenize(query))
+        doc_scores = {}
+        
+        for token in query_tokens:
+            if token in self.keyword_index:
+                for doc_id in self.keyword_index[token]:
+                    doc_scores[doc_id] = doc_scores.get(doc_id, 0) + 1
+        
+        if not doc_scores:
+            return []
+        
+        max_score = max(doc_scores.values())
+        results = [(doc_id, score/max_score) for doc_id, score in doc_scores.items()]
+        results.sort(key=lambda x: x[1], reverse=True)
+        
+        return results[:top_k]
 
-    # 1つ目は最も近いもの
-    best_idx = int(np.argmax(sim_to_query))
-    selected.append(best_idx)
-    candidates.remove(best_idx)
-
-    while len(selected) < min(top_k, len(doc_vecs)) and candidates:
-        mmr_scores = []
-        for c in candidates:
-            redundancy = max([cosine_similarity(doc_vecs[c].reshape(1, -1), doc_vecs[s].reshape(1, -1))[0][0] for s in selected]) if selected else 0.0
-            score = lambda_mult * sim_to_query[c] - (1 - lambda_mult) * redundancy
-            mmr_scores.append((c, score))
-        mmr_scores.sort(key=lambda x: x[1], reverse=True)
-        best = mmr_scores[0][0]
-        selected.append(best)
-        candidates.remove(best)
-    return selected
-
-class OhtaniRAGSystem:
-    def __init__(self, csv_path: str, use_embeddings: bool, embed_model_name: str):
-        """大谷翔平RAGシステムの初期化"""
-        # CSV読み込み（RAG配下が最小行なら親ディレクトリをフォールバック）
-        df = pd.read_csv(csv_path)
-        if len(df) < 50:
-            parent_path = os.path.join(os.path.dirname(os.path.dirname(csv_path)), "ohtani_rag_final.csv")
-            if os.path.exists(parent_path):
-                df = pd.read_csv(parent_path)
-        self.df = df
-
-        # TF-IDF（日本語トークナイザ対応）
-        analyzer = None
-        if _JANOME_AVAILABLE:
-            analyzer = tokenize_ja
-        self.vectorizer = TfidfVectorizer(max_features=4000, tokenizer=analyzer)
-        self.question_vectors = self.vectorizer.fit_transform(self.df['Question'])
-        self.answer_vectors = TfidfVectorizer(max_features=4000, tokenizer=analyzer).fit_transform(self.df['Answer'])
-
-        # 埋め込み（任意）
-        self.use_embeddings = use_embeddings and _EMBED_AVAILABLE
-        self.embed_model = None
-        self.q_embed = None
-        self.a_embed = None
-        if self.use_embeddings:
-            self.embed_model = SentenceTransformer(embed_model_name)
-            self.q_embed = self.embed_model.encode(self.df['Question'].tolist(), normalize_embeddings=True)
-            self.a_embed = self.embed_model.encode(self.df['Answer'].tolist(), normalize_embeddings=True)
-
-        # 大谷選手の発言パターンを抽出
-        self.speech_patterns = self._extract_speech_patterns()
-        # 大谷選手の答え方の癖を学習
-        self.style = self._learn_style()
-
-    def _extract_speech_patterns(self) -> List[str]:
-        """大谷選手の実際の発言からパターンを抽出"""
-        patterns = []
-        answers = self.df['Answer'].tolist()
-        common_patterns = [
-            r'まだまだ.*?と思います',
-            r'.*?のおかげで.*?',
-            r'.*?から学ぶことが.*?',
-            r'そうですね.*?',
-            r'.*?だと思うので.*?',
-            r'.*?というのは.*?',
-            r'.*?かなと思います',
-            r'.*?じゃないかなと.*?',
-            r'.*?していきたいなと思います',
-            r'.*?ということです',
-        ]
-        for answer in answers:
-            for pattern in common_patterns:
-                matches = re.findall(pattern, answer)
-                patterns.extend(matches[:3])
-        return list(set(patterns))[:50]
-
-    def _learn_style(self) -> Dict[str, List[str]]:
-        """Answer列から『答え方の癖』を学習する簡易スタイルモデル"""
-        answers = [str(a) for a in self.df['Answer'].tolist() if isinstance(a, str)]
-        starters_count = {}
-        endings_count = {}
-        hesitations = ["そうですね", "んー", "まあ", "あの", "やっぱり"]
-        connectors = ["まず", "その上で", "なので", "ただ", "一方で", "しっかり", "徐々に"]
-        for a in answers:
-            # 文ごと
-            sents = [s for s in re.split(r"[。!?！？」]", a) if s.strip()]
-            if sents:
-                start = sents[0].strip()[:6]
-                starters_count[start] = starters_count.get(start, 0) + 1
-            # 代表的な文末
-            m = re.findall(r"(と思います|かなと思います|だと思います|じゃないかなと|ではないかな|していきたい|です|ます)\s*$", a)
-            for e in m:
-                endings_count[e] = endings_count.get(e, 0) + 1
-        # 上位抽出
-        def topk(d: Dict[str, int], k: int) -> List[str]:
-            return [w for w, _ in sorted(d.items(), key=lambda x: x[1], reverse=True)[:k]]
-        style = {
-            "starters": topk(starters_count, 10) or ["そうですね"],
-            "endings": topk(endings_count, 10) or ["と思います"],
-            "hesitations": hesitations,
-            "connectors": connectors,
-        }
-        return style
-
-    def _apply_style(self, query: str, core_text: str | None = None) -> str:
-        """学習した癖を使って応答を包む"""
-        import random
-        starter = random.choice(self.style["starters"]) if self.style["starters"] else "そうですね"
-        hesi = random.choice(self.style["hesitations"]) if np.random.rand() < 0.6 else ""
-        conn = random.choice(self.style["connectors"]) if np.random.rand() < 0.5 else ""
-        ending = random.choice(self.style["endings"]) if self.style["endings"] else "と思います"
-        prefix = f"{starter}、" if starter else ""
-        if hesi and not prefix.startswith(hesi):
-            prefix = hesi + "、" + prefix
-        body = core_text.strip() if core_text else f"{query}については{ending}。"
-        if not body.endswith("。"):
-            body += "。"
-        tail = f"{conn}、これからもしっかり準備していきたい{ending}。" if conn else f"これからも継続していきたい{ending}。"
-        return prefix + body + tail
-
-    def _similarities(self, query: str, use_answer_space: bool = False) -> np.ndarray:
-        """埋め込み or TF-IDF で類似度を返す"""
-        if self.use_embeddings:
-            vec = self.embed_model.encode([query], normalize_embeddings=True)[0]
-            mat = self.a_embed if use_answer_space else self.q_embed
-            return cosine_similarity(vec.reshape(1, -1), mat)[0]
-        else:
-            vectorizer = (TfidfVectorizer(max_features=4000, tokenizer=tokenize_ja)
-                         if _JANOME_AVAILABLE else self.vectorizer)
-            vec = vectorizer.fit(self.df['Question']).transform([query])
-            mat = self.answer_vectors if use_answer_space else self.question_vectors
-            return cosine_similarity(vec, mat)[0]
-
-    def layer1_direct_search(self, query: str, threshold: float = 0.7, top_k: int = 1, mmr_lambda: float = 0.5) -> Tuple[List[Dict], str]:
-        """Layer 1: 直接検索 → 信頼度: 高"""
-        sims = self._similarities(query, use_answer_space=False)
-        if top_k == 1:
-            best_idx = int(np.argmax(sims))
-            best_score = float(sims[best_idx])
-            if best_score >= threshold:
-                return [{
-                    'question': self.df.iloc[best_idx]['Question'],
-                    'answer': self.df.iloc[best_idx]['Answer'],
-                    'score': best_score,
-                    'id': int(self.df.iloc[best_idx]['ID']),
-                    'confidence': 'high'
-                }], "直接検索で高精度マッチを発見"
-            return [], "直接検索では該当なし"
-        # MMRで複数取得
-        idxs = mmr(sims.reshape(-1, 1), sims.reshape(-1, 1), top_k=top_k, lambda_mult=mmr_lambda)
-        results = []
-        for i in idxs:
-            if sims[i] >= threshold:
-                results.append({
-                    'question': self.df.iloc[i]['Question'],
-                    'answer': self.df.iloc[i]['Answer'],
-                    'score': float(sims[i]),
-                    'id': int(self.df.iloc[i]['ID']),
-                    'confidence': 'high'
-                })
-        return (results, f"直接検索で{len(results)}件") if results else ([], "直接検索では該当なし")
-
-    def layer2_concept_search(self, query: str, threshold: float = 0.5, top_k: int = 3, mmr_lambda: float = 0.5) -> Tuple[List[Dict], str]:
-        """Layer 2: 概念検索 → 信頼度: 中"""
-        concept_expansions = {
-            'AI': ['技術', '新しい', '学習', '進歩', '挑戦', '未来'],
-            '宇宙': ['夢', '挑戦', '新しい', '目標', '広い'],
-            '料理': ['食事', '好き', '楽しい', 'おいしい'],
-            '映画': ['見る', '楽しい', '時間', 'リラックス'],
-            '音楽': ['聞く', '好き', 'リラックス', '楽しい'],
-            '家族': ['大切', '支え', 'ありがたい', '感謝'],
-            '友達': ['仲間', 'チームメート', '大切', '信頼'],
-            '将来': ['目標', '夢', '挑戦', '頑張る'],
-            '困難': ['挑戦', '乗り越える', '学ぶ', '成長'],
-            '成功': ['努力', '継続', 'チーム', '感謝'],
-        }
-        expanded_query = query
-        for concept, keywords in concept_expansions.items():
-            if concept in query:
-                expanded_query += ' ' + ' '.join(keywords)
-        sims = self._similarities(expanded_query, use_answer_space=False)
-        idxs = np.argsort(sims)[-top_k:][::-1]
-        results = []
-        for idx in idxs:
-            if sims[idx] >= threshold:
-                results.append({
-                    'question': self.df.iloc[idx]['Question'],
-                    'answer': self.df.iloc[idx]['Answer'],
-                    'score': float(sims[idx]),
-                    'id': int(self.df.iloc[idx]['ID']),
-                    'confidence': 'medium'
-                })
-        return (results, f"概念検索で{len(results)}件発見 (拡張: {expanded_query})") if results else ([], "概念検索でも該当なし")
-
-    def layer3_pattern_generation(self, query: str) -> Tuple[str, str]:
-        """Layer 3: パターン生成 → 信頼度: 低"""
-        import random
-        selected_patterns = random.sample(self.speech_patterns, min(3, len(self.speech_patterns)))
-        # 回答空間に対する近傍からキーワードを拝借
-        sims = self._similarities(query, use_answer_space=True)
-        top_idx = int(np.argmax(sims))
-        related_answer = self.df.iloc[top_idx]['Answer']
-        generated_response = self._generate_pattern_response(query, selected_patterns, related_answer)
-        return generated_response, f"パターン生成 (使用パターン: {len(selected_patterns)}個)"
-
-    def _generate_pattern_response(self, query: str, patterns: List[str], related_answer: str) -> str:
-        # 既存の組み立てに学習スタイルを適用
-        base_responses = [
-            f"{query}に関しては",
-            f"うーん、{query}というのは",
-            f"{query}については",
-        ]
-        middle_parts = [
-            "新しいことに挑戦するのは素晴らしいことだと思います",
-            "まだまだ学ぶことがたくさんあると感じています",
-            "これからも努力を続けていきたいと思います",
-            "チームのみんなのおかげで成長できています",
-        ]
-        ending_parts = [
-            "野球以外のことからも学ぶことがたくさんあると思っています。",
-            "これからも頑張っていきたいなと思います。",
-            "継続していくことが大切だと思います。",
-        ]
-        import random
-        core = random.choice(base_responses) + random.choice(middle_parts) + "。" + random.choice(ending_parts)
-        return self._apply_style(query, core)
-
-    def aggregate_answers(self, hits: List[Dict], max_chars: int = 400, style: bool = False, query: str = "") -> str:
-        """複数根拠を短く統合（任意でスタイル適用）"""
-        if not hits:
-            return ""
-        texts = []
-        for h in hits:
-            ans = str(h['answer']).strip()
-            if ans:
-                texts.append(ans)
-        core = " ".join(texts)[:max_chars]
-        return self._apply_style(query, core) if style else core
-
-    def search(self, query: str, l1_th: float, l2_th: float, top_k: int, mmr_lambda: float, style_on_aggregate: bool) -> Dict:
-        """3層段階検索の実行（設定反映）"""
-        # Layer 1
-        results1, msg1 = self.layer1_direct_search(query, threshold=l1_th, top_k=top_k, mmr_lambda=mmr_lambda)
-        if results1:
-            answer = results1[0]['answer'] if top_k == 1 else self.aggregate_answers(results1, style=style_on_aggregate, query=query)
-            return {
-                'layer': 1,
-                'results': results1,
-                'message': msg1,
-                'confidence': 'high',
-                'response': answer,
-                'source': f"; ".join([f"ID {r['id']}: {r['question'][:40]}" for r in results1])
-            }
-
-        # Layer 2
-        results2, msg2 = self.layer2_concept_search(query, threshold=l2_th, top_k=top_k, mmr_lambda=mmr_lambda)
-        if results2:
-            answer = results2[0]['answer'] if top_k == 1 else self.aggregate_answers(results2, style=style_on_aggregate, query=query)
-            return {
-                'layer': 2,
-                'results': results2,
-                'message': msg2,
-                'confidence': 'medium',
-                'response': answer,
-                'source': f"; ".join([f"ID {r['id']}: {r['question'][:40]}" for r in results2])
-            }
-
-        # Layer 3
-        generated_response, msg3 = self.layer3_pattern_generation(query)
+# メインRAGシステム
+class FastOhtaniRAG:
+    """高速大谷翔平RAGシステム"""
+    
+    def __init__(self, csv_path: str):
+        self.df = self._load_data(csv_path)
+        self.questions = self.df['Question'].fillna('').astype(str).tolist()
+        self.answers = self.df['Answer'].fillna('').astype(str).tolist()
+        
+        # 検索システム初期化
+        self.tfidf_search = LightweightTextSearch(self.questions)
+        self.keyword_search = KeywordSearch(self.questions)
+        self.answer_search = KeywordSearch(self.answers)
+        
+        # 大谷選手の話し方パターン
+        self.ohtani_patterns = self._extract_speech_patterns()
+    
+    def _load_data(self, csv_path: str) -> pd.DataFrame:
+        """データ読み込み"""
+        try:
+            df = pd.read_csv(csv_path)
+            if len(df) < 50:
+                parent_path = os.path.join(os.path.dirname(os.path.dirname(csv_path)), "ohtani_rag_final.csv")
+                if os.path.exists(parent_path):
+                    df = pd.read_csv(parent_path)
+            return df
+        except FileNotFoundError:
+            return self._create_sample_data()
+    
+    def _create_sample_data(self) -> pd.DataFrame:
+        """サンプルデータ"""
+        return pd.DataFrame({
+            'ID': range(1, 21),
+            'Question': [
+                '野球以外で興味のあることはありますか？',
+                'オフシーズンはどう過ごしていますか？',
+                '好きな食べ物は何ですか？',
+                '将来の目標について教えてください',
+                'チームメイトとの関係はいかがですか？',
+                '困難な時期をどう乗り越えますか？',
+                '日本とアメリカの違いは？',
+                'ファンへのメッセージをお願いします',
+                'トレーニングで大切にしていることは？',
+                '野球を始めたきっかけは？',
+                'リラックス方法は？',
+                '尊敬する選手はいますか？',
+                '子供たちへのアドバイスは？',
+                'プレッシャーを感じることは？',
+                '今シーズンの目標は？',
+                'コーチとの関係について',
+                'けがをした時の気持ちは？',
+                'オールスターゲームの感想は？',
+                '野球の魅力とは？',
+                'これからの野球界について'
+            ],
+            'Answer': [
+                'そうですね、料理をするのが好きですね。新しいレシピに挑戦することで、野球以外でも成長できると思っています。',
+                'トレーニングはもちろんですが、リラックスすることも大切にしています。読書をしたり、映画を見たりしています。',
+                '和食が一番好きですね。特に母が作ってくれた料理の味は忘れられません。',
+                '常に成長し続けることが目標です。野球を通じて多くの人に影響を与えられる選手になりたいです。',
+                'チームメイトはみんな素晴らしい人たちです。お互いを高め合える関係を築けていると思います。',
+                '困難な時こそ、基本に立ち戻ることを大切にしています。そして、支えてくれる人たちへの感謝を忘れずに。',
+                '文化の違いはありますが、野球への情熱は同じです。どちらの国からも学ぶことがたくさんあります。',
+                'いつも応援してくださって、本当にありがとうございます。皆さんの声援が力になっています。',
+                '継続することが一番大切だと思います。小さなことの積み重ねが大きな成果につながります。',
+                '父の影響が大きかったです。野球の楽しさを教えてもらいました。',
+                '自然の中で過ごすことが多いですね。散歩をしたり、空を眺めたりしています。',
+                'イチロー選手には本当に多くのことを学ばせていただきました。',
+                '好きなことを見つけて、それを大切にしてほしいです。そして諦めずに続けてください。',
+                'プレッシャーは感じますが、それを楽しめるようになりました。',
+                'チーム一丸となって、良い結果を残したいと思います。',
+                'コーチからはたくさんのアドバイスをもらっています。とても感謝しています。',
+                'けがは辛いですが、それも経験の一つだと考えています。',
+                'ファンの皆さんと一緒に楽しい時間を過ごせました。',
+                '野球は人と人をつなげる素晴らしいスポーツだと思います。',
+                '若い選手たちの成長が楽しみです。野球界全体がより良くなることを願っています。'
+            ]
+        })
+    
+    def _extract_speech_patterns(self) -> Dict:
+        """大谷選手の話し方パターン抽出"""
         return {
-            'layer': 3,
-            'results': [],
-            'message': msg3,
+            'starters': ['そうですね', 'うーん', 'やっぱり', 'まあ'],
+            'endings': ['と思います', 'かなと思います', 'じゃないかなと', 'ですね'],
+            'values': ['感謝', 'チーム', '成長', '挑戦', '継続', '努力'],
+            'humble': ['まだまだ', '勉強になります', 'ありがたい', 'おかげで']
+        }
+    
+    def search(self, query: str, method: str = 'hybrid', threshold: float = 0.3) -> Dict:
+        """3段階検索システム"""
+        
+        # Layer 1: TF-IDF検索
+        if method in ['tfidf', 'hybrid']:
+            tfidf_results = self.tfidf_search.search(query, top_k=3)
+            if tfidf_results and tfidf_results[0][1] >= threshold:
+                idx, score = tfidf_results[0]
+                return {
+                    'layer': 1,
+                    'method': 'TF-IDF',
+                    'confidence': 'high' if score > 0.5 else 'medium',
+                    'response': self.answers[idx],
+                    'source': f"ID {self.df.iloc[idx]['ID']}: {self.questions[idx][:50]}...",
+                    'score': float(score),
+                    'search_results': tfidf_results
+                }
+        
+        # Layer 2: キーワード検索
+        if method in ['keyword', 'hybrid']:
+            keyword_results = self.keyword_search.search(query, top_k=3)
+            if keyword_results and keyword_results[0][1] >= threshold * 0.7:
+                idx, score = keyword_results[0]
+                return {
+                    'layer': 2,
+                    'method': 'キーワード',
+                    'confidence': 'medium',
+                    'response': self.answers[idx],
+                    'source': f"ID {self.df.iloc[idx]['ID']}: {self.questions[idx][:50]}...",
+                    'score': float(score),
+                    'search_results': keyword_results
+                }
+        
+        # Layer 3: 回答空間検索
+        answer_results = self.answer_search.search(query, top_k=3)
+        if answer_results and answer_results[0][1] >= threshold * 0.5:
+            idx, score = answer_results[0]
+            return {
+                'layer': 3,
+                'method': '回答空間',
+                'confidence': 'medium',
+                'response': self.answers[idx],
+                'source': f"ID {self.df.iloc[idx]['ID']}: 回答から検索",
+                'score': float(score),
+                'search_results': answer_results
+            }
+        
+        # Layer 4: パターン生成
+        generated_response = self._generate_pattern_response(query)
+        return {
+            'layer': 4,
+            'method': 'パターン生成',
             'confidence': 'low',
             'response': generated_response,
-            'source': "大谷選手の発言パターンから生成"
+            'source': '大谷選手の発言パターンから生成',
+            'score': 0.1,
+            'search_results': []
         }
+    
+    def _generate_pattern_response(self, query: str) -> str:
+        """パターン生成"""
+        starter = random.choice(self.ohtani_patterns['starters'])
+        ending = random.choice(self.ohtani_patterns['endings'])
+        value = random.choice(self.ohtani_patterns['values'])
+        
+        templates = [
+            f"{starter}、{query}については、{value}を大切に{ending}。",
+            f"{query}に関しては、まだまだ学ぶことが多い{ending}。",
+            f"{starter}、{query}というのは、とても大切なこと{ending}。"
+        ]
+        
+        return random.choice(templates)
+    
+    def prepare_ai_context(self, query: str, search_results: List[Tuple[int, float]]) -> str:
+        """AI生成用コンテキスト準備"""
+        context_parts = []
+        
+        if search_results:
+            context_parts.append("【参考となる大谷選手の過去の発言】")
+            for i, (idx, score) in enumerate(search_results[:3], 1):
+                context_parts.append(f"{i}. Q: {self.questions[idx]}")
+                context_parts.append(f"   A: {self.answers[idx]}")
+            context_parts.append("")
+        
+        context_parts.extend([
+            "【大谷翔平選手の話し方の特徴】",
+            "- 謙虚で丁寧な口調（「そうですね」「と思います」をよく使う）",
+            "- チームメイトや周りの人への感謝を忘れない",
+            "- 成長や学び、継続を大切にする姿勢",
+            "- 前向きで誠実な答え方",
+            "- 野球での経験を交えながら答える",
+            "",
+            f"質問: {query}",
+            "",
+            "あなたは大谷翔平選手として、上記の特徴を活かして150-250文字で自然に回答してください：",
+        ])
+        
+        return "\n".join(context_parts)
 
-
-def main():
-    st.title("⚾ 大谷翔平 AI Chat")
-    st.subheader("🚀 3層段階RAGシステム - 真のRAG価値を発揮するハイブリッドシステム")
-
-    # サイドバー設定
-    st.sidebar.header("⚙️ 設定")
-    use_embeddings = st.sidebar.checkbox("Sentence-Transformers 埋め込みを使う", value=_EMBED_AVAILABLE)
-    embed_model = st.sidebar.text_input("埋め込みモデル", value="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2")
-    top_k = st.sidebar.slider("Top K (根拠件数)", 1, 5, 1)
-    l1_th = st.sidebar.slider("Layer1 閾値", 0.0, 1.0, 0.7, 0.05)
-    l2_th = st.sidebar.slider("Layer2 閾値", 0.0, 1.0, 0.5, 0.05)
-    mmr_lambda = st.sidebar.slider("MMR λ (多様性)", 0.0, 1.0, 0.5, 0.05)
-    style_on_aggregate = st.sidebar.checkbox("複数根拠を大谷スタイルで要約する", value=True)
-
-    # RAGシステムの初期化
-    @st.cache_resource
-    def load_rag_system_cached(_use_embeddings: bool, _model: str):
-        return OhtaniRAGSystem('ohtani_rag_final.csv', _use_embeddings, _model)
+# AI API呼び出し関数
+def call_gemini_api(prompt: str, api_key: str) -> Optional[str]:
+    """Gemini API呼び出し"""
     try:
-        rag_system = load_rag_system_cached(use_embeddings, embed_model)
-        st.success(f"✅ RAG初期化完了 ({len(rag_system.df)}件 / embeddings={rag_system.use_embeddings})")
+        import google.generativeai as genai
+        genai.configure(api_key=api_key)
+        
+        model = genai.GenerativeModel("gemini-1.5-flash")
+        response = model.generate_content(
+            prompt,
+            generation_config=genai.GenerationConfig(
+                max_output_tokens=300,
+                temperature=0.7
+            )
+        )
+        
+        return response.text if hasattr(response, 'text') else None
     except Exception as e:
-        st.error(f"❌ 初期化エラー: {e}")
-        return
+        return f"Gemini APIエラー: {str(e)}"
 
+def call_openai_api(prompt: str, api_key: str) -> Optional[str]:
+    """OpenAI API呼び出し"""
+    try:
+        headers = {
+            'Authorization': f'Bearer {api_key}',
+            'Content-Type': 'application/json'
+        }
+        
+        data = {
+            'model': 'gpt-3.5-turbo',
+            'messages': [{'role': 'user', 'content': prompt}],
+            'max_tokens': 250,
+            'temperature': 0.7
+        }
+        
+        response = requests.post(
+            'https://api.openai.com/v1/chat/completions',
+            headers=headers,
+            json=data,
+            timeout=30
+        )
+        
+        if response.status_code == 200:
+            return response.json()['choices'][0]['message']['content']
+        else:
+            return f"OpenAI APIエラー: {response.status_code}"
+    except Exception as e:
+        return f"OpenAI API接続エラー: {str(e)}"
+
+# メイン関数
+def main():
+    st.title("AI谷翔平")
+    st.subheader("🚀 高速RAG + 生成AI ハイブリッドシステム")
+    
+    # サイドバー設定
+    with st.sidebar:
+        st.header("⚙️ 設定")
+        
+        # 検索設定
+        search_method = st.selectbox(
+            "検索方法",
+            options=['hybrid', 'tfidf', 'keyword'],
+            index=0,
+            help="hybrid: 複数手法組み合わせ（推奨）"
+        )
+        
+        threshold = st.slider("検索閾値", 0.1, 0.8, 0.3, 0.05)
+        
+        st.divider()
+        
+        # AI API設定
+        st.subheader("🤖 生成AI設定")
+        ai_provider = st.selectbox("AIプロバイダー", ["なし", "Gemini", "OpenAI"])
+        
+        api_key = ""
+        if ai_provider == "Gemini":
+            api_key = st.text_input(
+                "Gemini API Key",
+                type="password",
+                value=os.getenv("GEMINI_API_KEY", ""),
+                help="Gemini APIキーを入力してください"
+            )
+        elif ai_provider == "OpenAI":
+            api_key = st.text_input(
+                "OpenAI API Key", 
+                type="password",
+                value=os.getenv("OPENAI_API_KEY", ""),
+                help="OpenAI APIキーを入力してください"
+            )
+        
+        use_ai = ai_provider != "なし" and bool(api_key)
+        
+        if use_ai:
+            st.success(f"✅ {ai_provider} API 有効")
+        else:
+            st.info("💡 APIキー未設定: パターン生成を使用")
+    
+    # RAGシステム初期化
+    @st.cache_resource
+    def load_rag_system():
+        return FastOhtaniRAG('ohtani_rag_final.csv')
+    
+    with st.spinner("🚀 システム初期化中..."):
+        rag = load_rag_system()
+    
+    st.success(f"✅ 初期化完了！ ({len(rag.df)}件のデータを読み込み)")
+    
+    # メイン画面
     st.markdown("---")
+    
+    # 質問入力
     query = st.text_input(
         "💬 大谷選手に質問してください:",
         placeholder="例: 野球以外で興味のあることはありますか？",
-        help="どんな質問でも3層システムが適切な回答を見つけます"
+        help="どんな質問でも大谷選手風に回答します"
     )
-
-    if st.button("🔍 質問する", type="primary"):
-        if query.strip():
-            with st.spinner("🤖 3層段階検索を実行中..."):
-                result = rag_system.search(query, l1_th=l1_th, l2_th=l2_th, top_k=top_k, mmr_lambda=mmr_lambda, style_on_aggregate=style_on_aggregate)
-
+    
+    # 操作ボタン
+    col1, col2, col3, col4 = st.columns([1, 1, 1, 1])
+    
+    with col1:
+        search_btn = st.button("🔍 質問する", type="primary")
+    with col2:
+        random_btn = st.button("🎲 ランダム")
+    with col3:
+        if st.button("🔄 リセット"):
+            st.rerun()
+    with col4:
+        show_stats = st.button("📊 統計")
+    
+    # ランダム質問
+    if random_btn:
+        sample_queries = [
+            "野球以外の趣味について教えてください",
+            "オフシーズンの過ごし方は？",
+            "好きな食べ物はありますか？",
+            "将来の目標を聞かせてください",
+            "ファンの皆さんへメッセージを",
+            "困難を乗り越える秘訣は？",
+            "チームメイトとの関係について",
+            "トレーニングで心がけていることは？"
+        ]
+        query = random.choice(sample_queries)
+        search_btn = True
+    
+    # 検索実行
+    if search_btn and query.strip():
+        with st.spinner("🤖 検索・生成中..."):
+            start_time = time.time()
+            
+            # RAG検索
+            result = rag.search(query, method=search_method, threshold=threshold)
+            search_time = time.time() - start_time
+            
+            # AI生成（設定されている場合）
+            ai_response = None
+            if use_ai and result.get('search_results'):
+                ai_start = time.time()
+                context = rag.prepare_ai_context(query, result['search_results'])
+                
+                if ai_provider == "Gemini":
+                    ai_response = call_gemini_api(context, api_key)
+                elif ai_provider == "OpenAI":
+                    ai_response = call_openai_api(context, api_key)
+                
+                ai_time = time.time() - ai_start
+            
+            # 結果表示
             st.markdown("---")
-            confidence_colors = {'high': '🔴', 'medium': '🟡', 'low': '🟢'}
-            confidence_labels = {'high': '高', 'medium': '中', 'low': '低'}
-            col1, col2, col3 = st.columns([1, 1, 2])
+            
+            # パフォーマンス情報
+            col1, col2, col3, col4 = st.columns(4)
             with col1:
-                st.metric("使用レイヤー", f"Layer {result['layer']}")
+                st.metric("レイヤー", f"Layer {result['layer']}")
             with col2:
-                st.metric("信頼度", f"{confidence_colors[result['confidence']]} {confidence_labels[result['confidence']]}")
+                confidence_colors = {'high': '🟢', 'medium': '🟡', 'low': '🔵'}
+                st.metric("信頼度", f"{confidence_colors[result['confidence']]} {result['confidence']}")
             with col3:
-                st.info(result['message'])
-
-            st.markdown("### 💬 大谷選手の回答")
-            st.markdown(f"**{result['response']}**")
-
-            st.markdown("### 📝 参考情報")
-            st.markdown(f"**出典:** {result['source']}")
-        else:
-            st.warning("質問を入力してください。")
-
+                st.metric("スコア", f"{result['score']:.3f}")
+            with col4:
+                st.metric("検索時間", f"{search_time:.2f}秒")
+            
+            # 回答表示
+            if ai_response and not ai_response.startswith("API"):
+                st.markdown("### 🤖 AI生成回答")
+                st.markdown(f"> {ai_response}")
+                
+                with st.expander("🔍 RAG検索結果"):
+                    st.markdown(f"**検索方法:** {result['method']}")
+                    st.markdown(f"**RAG回答:** {result['response']}")
+                    st.markdown(f"**出典:** {result['source']}")
+            else:
+                st.markdown("### 💬 大谷選手の回答")
+                st.markdown(f"> {result['response']}")
+                
+                if ai_response and ai_response.startswith("API"):
+                    st.warning(f"⚠️ {ai_response}")
+            
+            # 詳細情報
+            with st.expander("📝 詳細情報"):
+                st.json({
+                    "検索レイヤー": result['layer'],
+                    "検索方法": result['method'], 
+                    "信頼度": result['confidence'],
+                    "スコア": result['score'],
+                    "出典": result['source'],
+                    "検索時間": f"{search_time:.3f}秒"
+                })
+    
+    # 統計情報表示
+    if show_stats:
+        st.markdown("---")
+        st.markdown("### 📊 システム統計")
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            st.metric("総データ数", len(rag.df))
+            st.metric("語彙サイズ", len(rag.tfidf_search.vocab))
+        with col2:
+            st.metric("キーワード数", len(rag.keyword_search.keyword_index))
+            st.metric("メモリ効率", "軽量版")
+    
+    # サンプル質問セクション
     st.markdown("---")
     st.markdown("### 💡 サンプル質問")
-    sample_questions = [
-        "野球以外で興味のあることはありますか？",
-        "宇宙旅行についてどう思いますか？",
-        "AIについての考えを聞かせてください",
-        "好きな食べ物は何ですか？",
-        "将来の夢について教えてください",
-        "困難を乗り越える秘訣は？"
-    ]
-    cols = st.columns(2)
-    for i, q in enumerate(sample_questions):
-        with cols[i % 2]:
-            if st.button(f"📋 {q}", key=f"sample_{i}"):
-                st.session_state.sample_query = q
-                st.rerun()
-
-    if 'sample_query' in st.session_state:
-        query = st.session_state.sample_query
-        del st.session_state.sample_query
-        with st.spinner("🤖 3層段階検索を実行中..."):
-            result = rag_system.search(query, l1_th=l1_th, l2_th=l2_th, top_k=top_k, mmr_lambda=mmr_lambda, style_on_aggregate=style_on_aggregate)
-        st.markdown("---")
-        confidence_colors = {'high': '🔴', 'medium': '🟡', 'low': '🟢'}
-        confidence_labels = {'high': '高', 'medium': '中', 'low': '低'}
-        col1, col2, col3 = st.columns([1, 1, 2])
-        with col1:
-            st.metric("使用レイヤー", f"Layer {result['layer']}")
-        with col2:
-            st.metric("信頼度", f"{confidence_colors[result['confidence']]} {confidence_labels[result['confidence']]}")
-        with col3:
-            st.info(result['message'])
-        st.markdown("### 💬 大谷選手の回答")
-        st.markdown(f"**{result['response']}**")
-        st.markdown("### 📝 参考情報")
-        st.markdown(f"**出典:** {result['source']}")
+    
+    sample_categories = {
+        "🏃‍♂️ 野球・スポーツ": [
+            "今シーズンの目標は？",
+            "トレーニングで大切にしていることは？",
+            "プレッシャーとどう向き合っていますか？"
+        ],
+        "🎯 プライベート": [
+            "オフの日はどう過ごしますか？", 
+            "好きな食べ物は？",
+            "リラックス方法は？"
+        ],
+        "🌟 人生観": [
+            "将来の夢について教えてください",
+            "困難を乗り越える秘訣は？",
+            "大切にしている価値観は？"
+        ]
+    }
+    
+    for category, questions in sample_categories.items():
+        with st.expander(category):
+            for i, q in enumerate(questions):
+                if st.button(q, key=f"{category}_{i}"):
+                    # 質問を実行
+                    result = rag.search(q, method=search_method, threshold=threshold)
+                    st.write(f"**質問:** {q}")
+                    st.write(f"**回答:** {result['response']}")
 
 if __name__ == "__main__":
     main()
