@@ -429,8 +429,8 @@ class ImprovedOhtaniRAG:
         
         return random.choice(general_templates)
     
-    def search(self, query: str, method: str = 'hybrid', threshold: float = 0.15) -> Dict:
-        """改善されたRAG検索システム（閾値を下げた）"""
+    def search(self, query: str, method: str = 'hybrid', threshold: float = 0.15, ai_provider: str = None, api_key: str = None) -> Dict:
+        """改善されたRAG検索システム（Layer 5でのAI生成優先）"""
         
         search_results = []
         
@@ -448,7 +448,8 @@ class ImprovedOhtaniRAG:
                     'source': f"RAG検索 - ID {self.df.iloc[idx]['ID']}: {self.questions[idx][:50]}...",
                     'score': float(score),
                     'search_results': search_results,
-                    'retrieved_docs': self._format_retrieved_docs(tfidf_results)
+                    'retrieved_docs': self._format_retrieved_docs(tfidf_results),
+                    'needs_ai': False
                 }
         
         # Layer 2: キーワード検索（質問空間）
@@ -465,7 +466,8 @@ class ImprovedOhtaniRAG:
                     'source': f"RAG検索 - ID {self.df.iloc[idx]['ID']}: {self.questions[idx][:50]}...",
                     'score': float(score),
                     'search_results': search_results,
-                    'retrieved_docs': self._format_retrieved_docs(keyword_results)
+                    'retrieved_docs': self._format_retrieved_docs(keyword_results),
+                    'needs_ai': False
                 }
         
         # Layer 3: 回答空間検索
@@ -481,7 +483,8 @@ class ImprovedOhtaniRAG:
                 'source': f"RAG検索 - ID {self.df.iloc[idx]['ID']}: 回答から検索",
                 'score': float(score),
                 'search_results': search_results,
-                'retrieved_docs': self._format_retrieved_docs(answer_results, answer_space=True)
+                'retrieved_docs': self._format_retrieved_docs(answer_results, answer_space=True),
+                'needs_ai': False
             }
         
         # Layer 4: 複数文書を統合してRAG生成
@@ -497,21 +500,41 @@ class ImprovedOhtaniRAG:
                 'source': f"RAG検索 - {len(all_results)}件の文書から統合生成",
                 'score': float(all_results[0][1]) if all_results else 0.1,
                 'search_results': search_results,
-                'retrieved_docs': self._format_retrieved_docs(all_results)
+                'retrieved_docs': self._format_retrieved_docs(all_results),
+                'needs_ai': False
             }
         
-        # Layer 5: 改善されたパターン生成
-        generated_response = self._generate_improved_pattern_response(query)
-        return {
-            'layer': 5,
-            'method': '改善パターン生成',
-            'confidence': 'low',
-            'response': generated_response,
-            'source': f'大谷選手の発言パターン（トピック: {self._detect_topic(query)}）から生成',
-            'score': 0.1,
-            'search_results': [],
-            'retrieved_docs': []
-        }
+        # Layer 5: AI生成優先（RAG情報なしの新しい質問）
+        # ここでAI APIが利用可能ならAI生成、そうでなければパターン生成
+        if ai_provider and api_key:
+            # AI生成用のコンテキストを準備（RAG情報なしver）
+            ai_context = self.prepare_no_rag_ai_context(query)
+            return {
+                'layer': 5,
+                'method': 'AI生成（新規質問）',
+                'confidence': 'medium',
+                'response': None,  # AI生成で後から設定
+                'source': f'AI生成 - 新しい質問（トピック: {self._detect_topic(query)}）',
+                'score': 0.2,  # AI生成なので少し高めのスコア
+                'search_results': [],
+                'retrieved_docs': [],
+                'needs_ai': True,
+                'ai_context': ai_context
+            }
+        else:
+            # AI APIが利用できない場合のフォールバック
+            generated_response = self._generate_improved_pattern_response(query)
+            return {
+                'layer': 5,
+                'method': '改善パターン生成',
+                'confidence': 'low',
+                'response': generated_response,
+                'source': f'パターン生成（トピック: {self._detect_topic(query)}）- APIキー未設定',
+                'score': 0.1,
+                'search_results': [],
+                'retrieved_docs': [],
+                'needs_ai': False
+            }
     
     def _format_retrieved_docs(self, results: List[Tuple[int, float]], answer_space: bool = False) -> List[Dict]:
         """検索された文書の整形"""
@@ -577,6 +600,65 @@ class ImprovedOhtaniRAG:
         return random.choice(templates)
     
     def prepare_ai_context(self, query: str, search_results: List[Tuple[int, float]]) -> str:
+        """AI生成用コンテキスト準備 - 改善版（RAGありの場合）"""
+        context_parts = []
+        
+        if search_results:
+            context_parts.append("【参考となる大谷選手の過去の発言】")
+            for i, (idx, score) in enumerate(search_results[:4], 1):  # より多くの参考資料
+                context_parts.append(f"{i}. Q: {self.questions[idx]}")
+                context_parts.append(f"   A: {self.answers[idx]}")
+                context_parts.append(f"   類似度: {score:.3f}")
+            context_parts.append("")
+        
+        # より詳細な話し方の特徴
+        context_parts.extend([
+            "【大谷翔平選手の話し方の詳細な特徴】",
+            "- 謙虚で丁寧な口調（「そうですね」「と思います」「まだまだ」をよく使う）",
+            "- チームメイトや周りの人への感謝を常に表現",
+            "- 成長・学び・継続・努力を大切にする姿勢",
+            "- 前向きで誠実、時に照れるような素直な答え方",
+            "- 野球での具体的な経験を交えながら答える",
+            "- 困難な質問にも真摯に向き合う姿勢",
+            "- 未来に向けての建設的な考え方",
+            "",
+            f"質問のトピック: {self._detect_topic(query)}",
+            f"質問: {query}",
+            "",
+            "【指示】",
+            "あなたは大谷翔平選手として、上記の参考発言と話し方の特徴を活かして、",
+            "自然で温かみのある回答を200-300文字で作成してください。",
+            "参考資料の内容を踏まえつつ、質問に対して大谷選手らしい誠実で前向きな回答をしてください：",
+        ])
+        
+        return "\n".join(context_parts)
+
+    def prepare_no_rag_ai_context(self, query: str) -> str:
+        """Layer 5用：RAG情報なしでのAI生成コンテキスト（80文字回答用）"""
+        topic = self._detect_topic(query)
+        
+        context_parts = [
+            "【大谷翔平選手として回答してください】",
+            "",
+            "【話し方の特徴】",
+            "- 謙虚で丁寧（「そうですね」「と思います」）",
+            "- 感謝の気持ちを表現",
+            "- 前向きで誠実",
+            "- 成長・努力・チームワークを重視",
+            "",
+            f"質問のトピック: {topic}",
+            f"質問: {query}",
+            "",
+            "【重要な指示】",
+            "- 大谷翔平選手として自然に回答",
+            "- 日本語で70-90文字程度の簡潔な回答",
+            "- 謙虚さと前向きさを含めて",
+            "- 具体的すぎる情報は避けて一般的な姿勢で答える",
+            "",
+            "回答："
+        ]
+        
+        return "\n".join(context_parts)
         """AI生成用コンテキスト準備 - 改善版"""
         context_parts = []
         
@@ -609,6 +691,60 @@ class ImprovedOhtaniRAG:
         ])
         
         return "\n".join(context_parts)
+
+# AI API呼び出し関数（Layer 5専用バージョン追加）
+def call_gemini_api_layer5(prompt: str, api_key: str) -> Optional[str]:
+    """Gemini API呼び出し - Layer 5専用（80文字回答）"""
+    try:
+        import google.generativeai as genai
+        genai.configure(api_key=api_key)
+        
+        model = genai.GenerativeModel("gemini-1.5-flash")
+        response = model.generate_content(
+            prompt,
+            generation_config=genai.GenerationConfig(
+                max_output_tokens=150,  # 短い回答用
+                temperature=0.9,        # より創造性を高める
+                top_p=0.95,
+                top_k=50
+            )
+        )
+        
+        return response.text if hasattr(response, 'text') else None
+    except Exception as e:
+        return f"Gemini APIエラー: {str(e)}"
+
+def call_openai_api_layer5(prompt: str, api_key: str) -> Optional[str]:
+    """OpenAI API呼び出し - Layer 5専用（80文字回答）"""
+    try:
+        headers = {
+            'Authorization': f'Bearer {api_key}',
+            'Content-Type': 'application/json'
+        }
+        
+        data = {
+            'model': 'gpt-3.5-turbo',
+            'messages': [{'role': 'user', 'content': prompt}],
+            'max_tokens': 120,      # 短い回答用
+            'temperature': 0.9,     # より創造性を高める
+            'top_p': 0.95,
+            'frequency_penalty': 0.4,  # 繰り返しを更に減らす
+            'presence_penalty': 0.3
+        }
+        
+        response = requests.post(
+            'https://api.openai.com/v1/chat/completions',
+            headers=headers,
+            json=data,
+            timeout=30
+        )
+        
+        if response.status_code == 200:
+            return response.json()['choices'][0]['message']['content']
+        else:
+            return f"OpenAI APIエラー: {response.status_code}"
+    except Exception as e:
+        return f"OpenAI API接続エラー: {str(e)}"
 
 # AI API呼び出し関数（改善版）
 def call_gemini_api(prompt: str, api_key: str) -> Optional[str]:
@@ -666,7 +802,7 @@ def call_openai_api(prompt: str, api_key: str) -> Optional[str]:
 
 # メイン関数
 def main():
-    st.title("AI大谷 - Ver2.0")
+    st.title("AI大谷 - 改善版")
     st.subheader("🚀 多様性向上RAG + 生成AI ハイブリッドシステム")
     
     # 改善点の説明
@@ -787,12 +923,36 @@ def main():
             start_time = time.time()
             
             # RAG検索
-            result = rag.search(query, method=search_method, threshold=threshold)
+            result = rag.search(query, method=search_method, threshold=threshold, ai_provider=ai_provider, api_key=api_key)
             search_time = time.time() - start_time
             
-            # AI生成（設定されている場合）
+            # AI生成処理の分岐
             ai_response = None
-            if use_ai and result.get('search_results'):
+            ai_time = 0
+            
+            if result.get('needs_ai') and use_ai:
+                # Layer 5: 新規質問のAI生成
+                ai_start = time.time()
+                if ai_provider == "Gemini":
+                    ai_response = call_gemini_api_layer5(result['ai_context'], api_key)
+                elif ai_provider == "OpenAI":
+                    ai_response = call_openai_api_layer5(result['ai_context'], api_key)
+                
+                ai_time = time.time() - ai_start
+                
+                if ai_response and not ai_response.startswith("API"):
+                    result['response'] = ai_response.strip()
+                    result['method'] = f"{ai_provider} AI生成（新規質問）"
+                    result['confidence'] = 'medium'
+                    st.success(f"✅ Layer 5 AI生成成功: 新しい質問に対してAIが回答生成 ({ai_time:.2f}秒)")
+                else:
+                    # AI生成失敗時のフォールバック
+                    result['response'] = rag._generate_improved_pattern_response(query)
+                    result['method'] = '改善パターン生成（AI失敗）'
+                    st.warning("⚠️ AI生成失敗、パターン生成にフォールバック")
+                    
+            elif result.get('search_results') and use_ai and result['layer'] <= 4:
+                # Layer 1-4: RAG情報ありのAI強化
                 ai_start = time.time()
                 context = rag.prepare_ai_context(query, result['search_results'])
                 
@@ -804,7 +964,7 @@ def main():
                 ai_time = time.time() - ai_start
                 
                 if ai_response and not ai_response.startswith("API"):
-                    st.info(f"✅ RAG+AI成功: {len(result.get('retrieved_docs', []))}件の文書から生成 ({ai_time:.2f}秒)")
+                    st.info(f"✅ RAG+AI強化: {len(result.get('retrieved_docs', []))}件の文書から生成 ({ai_time:.2f}秒)")
             
             # 結果表示
             st.markdown("---")
@@ -820,10 +980,21 @@ def main():
             with col3:
                 st.metric("スコア", f"{result['score']:.3f}")
             with col4:
-                st.metric("検索時間", f"{search_time:.2f}秒")
+                if ai_time > 0:
+                    st.metric("AI生成時間", f"{ai_time:.2f}秒")
+                else:
+                    st.metric("検索時間", f"{search_time:.2f}秒")
             
-            # 回答表示
-            if ai_response and not ai_response.startswith("API"):
+            # 回答表示の改善
+            if result['layer'] == 5 and result.get('needs_ai') and result['response']:
+                # Layer 5でのAI生成成功
+                st.markdown("### 🤖 AI大谷（新規質問）")
+                st.markdown(f"> {result['response']}")
+                
+                st.success(f"🎯 新しい質問に対してAIが大谷選手風に回答生成")
+                
+            elif ai_response and not ai_response.startswith("API") and result['layer'] <= 4:
+                # Layer 1-4でのRAG+AI強化
                 st.markdown("### 🤖 RAG + AI生成回答")
                 st.markdown(f"> {ai_response}")
                 
@@ -841,17 +1012,57 @@ def main():
                             st.markdown(f"   Q: {doc['question']}")
                             st.markdown(f"   A: {doc['answer'][:100]}...")
             else:
-                st.markdown("### 💬 RAG検索回答")
+                # 通常のRAG回答またはパターン生成
+                st.markdown("### 💬 AI大谷")
                 st.markdown(f"> {result['response']}")
                 
                 if result['layer'] <= 4:
                     st.info(f"🔍 RAG検索: {result['method']}で関連文書を発見")
-                else:
-                    st.warning("⚠️ RAG検索で関連文書が見つからず、改善されたパターン生成を使用")
+                elif result['layer'] == 5:
+                    if use_ai:
+                        st.warning("⚠️ 新規質問でしたが、AI生成に失敗しました")
+                    else:
+                        st.info("💡 新しい質問です。より自然な回答にはAPIキーを設定してください")
                 
                 if ai_response and ai_response.startswith("API"):
                     st.error(f"🚫 AI生成失敗: {ai_response}")
-                elif not use_ai:
+            
+            # レイヤー別の説明（更新）
+            layer_explanations = {
+                1: "🟢 TF-IDFによる高精度マッチング",
+                2: "🟡 キーワードによる中精度マッチング", 
+                3: "🟠 回答空間からの関連検索",
+                4: "🔵 複数文書統合による生成",
+                5: "🟣 AI生成（新規質問）" if use_ai else "🟣 パターン生成（新規質問）"
+            }
+            
+            st.info(f"使用したレイヤー: {layer_explanations.get(result['layer'], 'その他')}")
+            
+            # Layer 5の特別説明
+            if result['layer'] == 5:
+                if use_ai and result.get('needs_ai'):
+                    st.info("🚀 **Layer 5**: RAG検索で関連文書が見つからなかった新しい質問に対して、AIが大谷選手風の回答を生成しました！")
+                elif use_ai:
+                    st.info("🤖 **Layer 5**: AI生成が利用可能でしたが、パターン生成で十分な回答ができました")
+                else:
+                    st.info("💡 **Layer 5**: 新しい質問です。AIキーを設定すると、より自然で多様な回答が可能になります")
+            
+            # 詳細情報
+            with st.expander("📝 詳細情報"):
+                detailed_info = {
+                    "検索レイヤー": result['layer'],
+                    "検索方法": result['method'], 
+                    "信頼度": result['confidence'],
+                    "スコア": result['score'],
+                    "出典": result['source'],
+                    "検索時間": f"{search_time:.3f}秒",
+                    "AI生成時間": f"{ai_time:.3f}秒" if ai_time > 0 else "未使用",
+                    "検索された文書数": len(result.get('retrieved_docs', [])),
+                    "検出されたトピック": rag._detect_topic(query),
+                    "AI生成が必要": result.get('needs_ai', False),
+                    "回答文字数": len(result['response']) if result['response'] else 0
+                }
+                st.json(detailed_info) use_ai:
                     st.info("💡 より高品質な回答には、サイドバーでAI APIキーを設定してください")
             
             # レイヤー別の説明
