@@ -1061,20 +1061,6 @@ def main():
                     "検出されたトピック": rag._detect_topic(query),
                     "AI生成が必要": result.get('needs_ai', False),
                     "回答文字数": len(result['response']) if result['response'] else 0
-            # 詳細情報
-            with st.expander("📝 詳細情報"):
-                detailed_info = {
-                    "検索レイヤー": result['layer'],
-                    "検索方法": result['method'], 
-                    "信頼度": result['confidence'],
-                    "スコア": result['score'],
-                    "出典": result['source'],
-                    "検索時間": f"{search_time:.3f}秒",
-                    "AI生成時間": f"{ai_time:.3f}秒" if ai_time > 0 else "未使用",
-                    "検索された文書数": len(result.get('retrieved_docs', [])),
-                    "検出されたトピック": rag._detect_topic(query),
-                    "AI生成が必要": result.get('needs_ai', False),
-                    "回答文字数": len(result['response']) if result['response'] else 0
                 }
                 st.json(detailed_info)
     
@@ -1091,48 +1077,7 @@ def main():
         with col2:
             st.metric("キーワード数", len(rag.keyword_search.keyword_index))
             st.metric("話し方パターン数", len(rag.ohtani_patterns['starters']) + len(rag.ohtani_patterns['endings']))
-            st.metric("バージョン", "Layer5-AI強化版 v3.0") use_ai:
-                    st.info("💡 より高品質な回答には、サイドバーでAI APIキーを設定してください")
-            
-            # レイヤー別の説明
-            layer_explanations = {
-                1: "🟢 TF-IDFによる高精度マッチング",
-                2: "🟡 キーワードによる中精度マッチング", 
-                3: "🟠 回答空間からの関連検索",
-                4: "🔵 複数文書統合による生成",
-                5: "🟣 トピック別パターン生成"
-            }
-            
-            st.info(f"使用したレイヤー: {layer_explanations.get(result['layer'], 'その他')}")
-            
-            # 詳細情報
-            with st.expander("📝 詳細情報"):
-                detailed_info = {
-                    "検索レイヤー": result['layer'],
-                    "検索方法": result['method'], 
-                    "信頼度": result['confidence'],
-                    "スコア": result['score'],
-                    "出典": result['source'],
-                    "検索時間": f"{search_time:.3f}秒",
-                    "検索された文書数": len(result.get('retrieved_docs', [])),
-                    "検出されたトピック": rag._detect_topic(query)
-                }
-                st.json(detailed_info)
-    
-    # 統計情報表示
-    if show_stats:
-        st.markdown("---")
-        st.markdown("### 📊 システム統計")
-        
-        col1, col2 = st.columns(2)
-        with col1:
-            st.metric("総データ数", len(rag.df))
-            st.metric("語彙サイズ", len(rag.tfidf_search.vocab))
-            st.metric("トピックテンプレート数", len(rag.topic_templates))
-        with col2:
-            st.metric("キーワード数", len(rag.keyword_search.keyword_index))
-            st.metric("話し方パターン数", len(rag.ohtani_patterns['starters']) + len(rag.ohtani_patterns['endings']))
-            st.metric("バージョン", "改善版 v2.0")
+            st.metric("バージョン", "Layer5-AI強化版 v3.0")
     
     # 改善されたサンプル質問セクション
     st.markdown("---")
