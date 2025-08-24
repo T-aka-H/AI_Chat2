@@ -741,7 +741,7 @@ def call_openai_api_layer5(prompt: str, api_key: str) -> Optional[str]:
         
         if response.status_code == 200:
             return response.json()['choices'][0]['message']['content']
-        else:
+    else:
             return f"OpenAI APIエラー: {response.status_code}"
     except Exception as e:
         return f"OpenAI API接続エラー: {str(e)}"
@@ -945,7 +945,7 @@ def main():
                     result['method'] = f"{ai_provider} AI生成（新規質問）"
                     result['confidence'] = 'medium'
                     st.success(f"✅ Layer 5 AI生成成功: 新しい質問に対してAIが回答生成 ({ai_time:.2f}秒)")
-                else:
+            else:
                     # AI生成失敗時のフォールバック
                     result['response'] = rag._generate_improved_pattern_response(query)
                     result['method'] = '改善パターン生成（AI失敗）'
