@@ -717,31 +717,29 @@ def call_gemini_api_layer5(prompt: str, api_key: str) -> Optional[str]:
 def call_openai_api_layer5(prompt: str, api_key: str) -> Optional[str]:
     """OpenAI API呼び出し - Layer 5専用（80文字回答）"""
     try:
+        import requests
         headers = {
             'Authorization': f'Bearer {api_key}',
             'Content-Type': 'application/json'
         }
-        
         data = {
             'model': 'gpt-3.5-turbo',
             'messages': [{'role': 'user', 'content': prompt}],
-            'max_tokens': 120,      # 短い回答用
-            'temperature': 0.9,     # より創造性を高める
+            'max_tokens': 120,
+            'temperature': 0.9,
             'top_p': 0.95,
-            'frequency_penalty': 0.4,  # 繰り返しを更に減らす
+            'frequency_penalty': 0.4,
             'presence_penalty': 0.3
         }
-        
         response = requests.post(
             'https://api.openai.com/v1/chat/completions',
             headers=headers,
             json=data,
             timeout=30
         )
-        
         if response.status_code == 200:
             return response.json()['choices'][0]['message']['content']
-    else:
+        else:
             return f"OpenAI APIエラー: {response.status_code}"
     except Exception as e:
         return f"OpenAI API接続エラー: {str(e)}"
@@ -946,13 +944,13 @@ def main():
                     result['confidence'] = 'medium'
                     st.success(f"✅ Layer 5 AI生成成功: 新しい質問に対してAIが回答生成 ({ai_time:.2f}秒)")
             else:
-                    # AI生成失敗時のフォールバック
-                    result['response'] = rag._generate_improved_pattern_response(query)
-                    result['method'] = '改善パターン生成（AI失敗）'
-                    st.warning("⚠️ AI生成失敗、パターン生成にフォールバック")
-                    
-            elif result.get('search_results') and use_ai and result['layer'] <= 4:
-                # Layer 1-4: RAG情報ありのAI強化
+                # AI生成失敗時のフォールバック
+                result['response'] = rag._generate_improved_pattern_response(query)
+                result['method'] = '改善パターン生成（AI失敗）'
+                st.warning("⚠️ AI生成失敗、パターン生成にフォールバック")
+
+            # Layer 1-4: RAG情報ありのAI強化（別分岐）
+            if result.get('search_results') and use_ai and result['layer'] <= 4:
                 ai_start = time.time()
                 context = rag.prepare_ai_context(query, result['search_results'])
                 
