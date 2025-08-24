@@ -13,7 +13,7 @@ import requests
 
 # 設定
 st.set_page_config(
-    page_title="大谷翔平 AI Chat - 高速版",
+    page_title="AI大谷 - 高速版",
     page_icon="⚾",
     layout="wide"
 )
@@ -234,63 +234,133 @@ class FastOhtaniRAG:
         }
     
     def search(self, query: str, method: str = 'hybrid', threshold: float = 0.3) -> Dict:
-        """3段階検索システム"""
+        """RAG検索システム - Retrieval-Augmented Generation"""
         
-        # Layer 1: TF-IDF検索
+        search_results = []
+        
+        # Layer 1: TF-IDF検索（質問空間）
         if method in ['tfidf', 'hybrid']:
             tfidf_results = self.tfidf_search.search(query, top_k=3)
             if tfidf_results and tfidf_results[0][1] >= threshold:
                 idx, score = tfidf_results[0]
+                search_results = tfidf_results
                 return {
                     'layer': 1,
-                    'method': 'TF-IDF',
+                    'method': 'TF-IDF RAG',
                     'confidence': 'high' if score > 0.5 else 'medium',
                     'response': self.answers[idx],
-                    'source': f"ID {self.df.iloc[idx]['ID']}: {self.questions[idx][:50]}...",
+                    'source': f"RAG検索 - ID {self.df.iloc[idx]['ID']}: {self.questions[idx][:50]}...",
                     'score': float(score),
-                    'search_results': tfidf_results
+                    'search_results': search_results,
+                    'retrieved_docs': self._format_retrieved_docs(tfidf_results)
                 }
         
-        # Layer 2: キーワード検索
+        # Layer 2: キーワード検索（質問空間）
         if method in ['keyword', 'hybrid']:
             keyword_results = self.keyword_search.search(query, top_k=3)
             if keyword_results and keyword_results[0][1] >= threshold * 0.7:
                 idx, score = keyword_results[0]
+                search_results = keyword_results
                 return {
                     'layer': 2,
-                    'method': 'キーワード',
+                    'method': 'キーワードRAG',
                     'confidence': 'medium',
                     'response': self.answers[idx],
-                    'source': f"ID {self.df.iloc[idx]['ID']}: {self.questions[idx][:50]}...",
+                    'source': f"RAG検索 - ID {self.df.iloc[idx]['ID']}: {self.questions[idx][:50]}...",
                     'score': float(score),
-                    'search_results': keyword_results
+                    'search_results': search_results,
+                    'retrieved_docs': self._format_retrieved_docs(keyword_results)
                 }
         
         # Layer 3: 回答空間検索
         answer_results = self.answer_search.search(query, top_k=3)
         if answer_results and answer_results[0][1] >= threshold * 0.5:
             idx, score = answer_results[0]
+            search_results = answer_results
             return {
                 'layer': 3,
-                'method': '回答空間',
+                'method': '回答空間RAG',
                 'confidence': 'medium',
                 'response': self.answers[idx],
-                'source': f"ID {self.df.iloc[idx]['ID']}: 回答から検索",
+                'source': f"RAG検索 - ID {self.df.iloc[idx]['ID']}: 回答から検索",
                 'score': float(score),
-                'search_results': answer_results
+                'search_results': search_results,
+                'retrieved_docs': self._format_retrieved_docs(answer_results, answer_space=True)
             }
         
-        # Layer 4: パターン生成
+        # Layer 4: 複数文書を統合してRAG生成
+        all_results = self.keyword_search.search(query, top_k=5)
+        if all_results:
+            search_results = all_results
+            # 複数の関連文書を取得して統合
+            aggregated_context = self._aggregate_multiple_docs(all_results[:3])
+            return {
+                'layer': 4,
+                'method': '複数文書RAG',
+                'confidence': 'medium',
+                'response': aggregated_context,
+                'source': f"RAG検索 - {len(all_results)}件の文書から統合生成",
+                'score': float(all_results[0][1]) if all_results else 0.1,
+                'search_results': search_results,
+                'retrieved_docs': self._format_retrieved_docs(all_results)
+            }
+        
+        # Layer 5: パターン生成（RAG失敗時のフォールバック）
         generated_response = self._generate_pattern_response(query)
         return {
-            'layer': 4,
-            'method': 'パターン生成',
+            'layer': 5,
+            'method': 'パターン生成（非RAG）',
             'confidence': 'low',
             'response': generated_response,
-            'source': '大谷選手の発言パターンから生成',
+            'source': '大谷選手の発言パターンから生成（RAG情報なし）',
             'score': 0.1,
-            'search_results': []
+            'search_results': [],
+            'retrieved_docs': []
         }
+    
+    def _format_retrieved_docs(self, results: List[Tuple[int, float]], answer_space: bool = False) -> List[Dict]:
+        """検索された文書の整形"""
+        docs = []
+        for idx, score in results:
+            docs.append({
+                'id': int(self.df.iloc[idx]['ID']),
+                'question': self.questions[idx],
+                'answer': self.answers[idx],
+                'score': float(score),
+                'search_type': '回答空間' if answer_space else '質問空間'
+            })
+        return docs
+    
+    def _aggregate_multiple_docs(self, results: List[Tuple[int, float]]) -> str:
+        """複数文書からの情報統合（RAGの真価）"""
+        if not results:
+            return self._generate_pattern_response("一般的な質問")
+        
+        # 関連する複数の回答を取得
+        relevant_answers = []
+        for idx, score in results:
+            if score > 0.1:  # 最低限の関連性
+                relevant_answers.append(self.answers[idx])
+        
+        if not relevant_answers:
+            return self._generate_pattern_response("一般的な質問")
+        
+        # 複数回答から共通要素を抽出して統合
+        combined_keywords = []
+        for answer in relevant_answers:
+            keywords = re.findall(r'[\w\u3040-\u309f\u30a0-\u30ff\u4e00-\u9fff]+', answer)
+            combined_keywords.extend(keywords)
+        
+        # 頻出キーワードを特定
+        keyword_freq = Counter(combined_keywords)
+        top_keywords = [k for k, v in keyword_freq.most_common(5) if v > 1]
+        
+        # 統合回答生成
+        starter = random.choice(self.ohtani_patterns['starters'])
+        value = random.choice(top_keywords) if top_keywords else random.choice(self.ohtani_patterns['values'])
+        ending = random.choice(self.ohtani_patterns['endings'])
+        
+        return f"{starter}、それについては{value}を大切にしながら取り組んでいます。複数の経験から学んだことを活かして、これからも成長していきたい{ending}。"
     
     def _generate_pattern_response(self, query: str) -> str:
         """パターン生成"""
@@ -383,7 +453,7 @@ def call_openai_api(prompt: str, api_key: str) -> Optional[str]:
 
 # メイン関数
 def main():
-    st.title("AI谷翔平")
+    st.title("⚾ AI大谷")
     st.subheader("🚀 高速RAG + 生成AI ハイブリッドシステム")
     
     # サイドバー設定
@@ -486,10 +556,11 @@ def main():
             result = rag.search(query, method=search_method, threshold=threshold)
             search_time = time.time() - start_time
             
-            # AI生成（設定されている場合）
+            # AI生成（設定されている場合）- これが真のRAG！
             ai_response = None
             if use_ai and result.get('search_results'):
                 ai_start = time.time()
+                # RAG: 検索結果を使ってコンテキスト強化
                 context = rag.prepare_ai_context(query, result['search_results'])
                 
                 if ai_provider == "Gemini":
@@ -498,6 +569,10 @@ def main():
                     ai_response = call_openai_api(context, api_key)
                 
                 ai_time = time.time() - ai_start
+                
+                # RAG成功の表示
+                if ai_response and not ai_response.startswith("API"):
+                    st.info(f"✅ RAG成功: {len(result.get('retrieved_docs', []))}件の文書から生成 ({ai_time:.2f}秒)")
             
             # 結果表示
             st.markdown("---")
@@ -516,19 +591,36 @@ def main():
             
             # 回答表示
             if ai_response and not ai_response.startswith("API"):
-                st.markdown("### 🤖 AI生成回答")
+                st.markdown("### 🤖 RAG + AI生成回答")
                 st.markdown(f"> {ai_response}")
                 
-                with st.expander("🔍 RAG検索結果"):
+                st.success(f"🔍 RAG検索成功: {len(result.get('retrieved_docs', []))}件の関連文書を発見")
+                
+                with st.expander("🔍 RAG検索詳細"):
                     st.markdown(f"**検索方法:** {result['method']}")
-                    st.markdown(f"**RAG回答:** {result['response']}")
+                    st.markdown(f"**元の回答:** {result['response']}")
                     st.markdown(f"**出典:** {result['source']}")
+                    
+                    # 検索された文書一覧
+                    if result.get('retrieved_docs'):
+                        st.markdown("**検索された関連文書:**")
+                        for i, doc in enumerate(result['retrieved_docs'][:3], 1):
+                            st.markdown(f"{i}. スコア: {doc['score']:.3f}")
+                            st.markdown(f"   Q: {doc['question']}")
+                            st.markdown(f"   A: {doc['answer'][:100]}...")
             else:
-                st.markdown("### 💬 大谷選手の回答")
+                st.markdown("### 💬 RAG検索回答")
                 st.markdown(f"> {result['response']}")
                 
+                if result['layer'] <= 4:
+                    st.info(f"🔍 RAG検索: {result['method']}で関連文書を発見")
+                else:
+                    st.warning("⚠️ RAG検索で関連文書が見つからず、パターン生成を使用")
+                
                 if ai_response and ai_response.startswith("API"):
-                    st.warning(f"⚠️ {ai_response}")
+                    st.error(f"🚫 AI生成失敗: {ai_response}")
+                elif not use_ai:
+                    st.info("💡 より高品質な回答には、サイドバーでAI APIキーを設定してください")
             
             # 詳細情報
             with st.expander("📝 詳細情報"):
