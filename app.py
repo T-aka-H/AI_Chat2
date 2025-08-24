@@ -14,7 +14,6 @@ import requests
 # 設定
 st.set_page_config(
     page_title="AI大谷 - 高速版",
-    page_icon="⚾",
     layout="wide"
 )
 
@@ -453,7 +452,7 @@ def call_openai_api(prompt: str, api_key: str) -> Optional[str]:
 
 # メイン関数
 def main():
-    st.title("⚾ AI大谷")
+    st.title("AI大谷")
     st.subheader("🚀 高速RAG + 生成AI ハイブリッドシステム")
     
     # サイドバー設定
