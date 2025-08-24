@@ -1062,7 +1062,8 @@ def main():
                     "AI生成が必要": result.get('needs_ai', False),
                     "回答文字数": len(result['response']) if result['response'] else 0
                 }
-                st.json(detailed_info) use_ai:
+                st.json(detailed_info)
+                if use_ai:
                     st.info("💡 より高品質な回答には、サイドバーでAI APIキーを設定してください")
             
             # レイヤー別の説明
