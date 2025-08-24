@@ -169,7 +169,7 @@ class OhtaniRAGSystem:
 			vec = self.embed_model.encode([query], normalize_embeddings=True)[0]
 			mat = self.a_embed if use_answer_space else self.q_embed
 			return cosine_similarity(vec.reshape(1, -1), mat)[0]
-        else:
+		else:
 			vectorizer = (TfidfVectorizer(max_features=4000, tokenizer=tokenize_ja)
 						 if _JANOME_AVAILABLE else self.vectorizer)
 			vec = vectorizer.fit(self.df['Question']).transform([query])
