@@ -1338,7 +1338,7 @@ def show_chat_page():
         user_input = st.text_input(
             "メッセージを入力...", 
             key="message_input",
-            placeholder="大谷選手に話しかけてみよう！",
+            placeholder="竹野さんに話しかけてみよう！",
             label_visibility="collapsed"
         )
     
