@@ -11,6 +11,7 @@ import math
 import time
 import requests
 from datetime import datetime
+import html
 
 # ページナビゲーション（簡易版）
 def show_page_navigation() -> str:
@@ -828,11 +829,12 @@ def display_chat_messages():
     
     for i, msg in enumerate(st.session_state.chat_history):
         timestamp = msg["timestamp"]
+        safe_message = html.escape(str(msg.get("message", ""))).replace("\n", "<br>")
         
         if msg['type'] == 'user':
             chat_html += f'''
             <div class="user-message-container">
-                <div class="user-message">{msg["message"]}</div>
+                <div class="user-message">{safe_message}</div>
                 <div class="user-avatar">YOU</div>
             </div>
             <div class="timestamp">{timestamp}</div>
@@ -842,7 +844,7 @@ def display_chat_messages():
             chat_html += f'''
             <div class="ohtani-message-container">
                 <div class="ohtani-avatar">🐶</div>
-                <div class="ohtani-message">{msg["message"]}</div>
+                <div class="ohtani-message">{safe_message}</div>
             </div>
             <div class="timestamp">{timestamp}</div>
             '''
@@ -1084,6 +1086,10 @@ def show_chat_page():
                 if ai_response and not ai_response.startswith(('API', 'AI')):
                     ohtani_response = ai_response.strip()
                     method = f"{ai_provider} AI生成"
+                # 生成失敗やAPIエラー時はフォールバック
+                if not ohtani_response:
+                    ohtani_response = rag._generate_chat_response(user_input)
+                    method = f"{method}→フォールバック"
             
             # 大谷選手の返答を追加
             add_message('ohtani', ohtani_response, method)
