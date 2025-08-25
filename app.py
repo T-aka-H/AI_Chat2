@@ -1261,7 +1261,7 @@ def show_chat_page():
         
         st.metric("💬 総メッセージ数", total_messages)
         st.metric("👤 あなたの発言", user_messages)
-        st.metric("🐶 大谷選手の返答", ohtani_messages)
+        st.metric("🐶 竹野さんの返答", ohtani_messages)
         
         # 今日の大谷情報（楽しい要素）
         with st.expander("📊 今日の大谷選手"):
