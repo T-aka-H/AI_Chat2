@@ -12,6 +12,7 @@ import time
 import requests
 from datetime import datetime
 import html
+import textwrap
 
 # ページナビゲーション（簡易版）
 def show_page_navigation() -> str:
@@ -40,7 +41,7 @@ st.set_page_config(
 
 # カスタムCSS - LINE風スタイル
 def load_css():
-    st.markdown("""
+    st.markdown(textwrap.dedent("""
     <style>
     /* 全体の背景 */
     .main .block-container {
@@ -356,7 +357,7 @@ def load_css():
         }
     }
     </style>
-    """, unsafe_allow_html=True)
+    """), unsafe_allow_html=True)
 
 # 軽量テキスト検索クラス
 class LightweightTextSearch:
@@ -828,8 +829,13 @@ def display_chat_messages():
     chat_html = '<div class="chat-background">'
     
     for i, msg in enumerate(st.session_state.chat_history):
-        timestamp = msg["timestamp"]
-        safe_message = html.escape(str(msg.get("message", ""))).replace("\n", "<br>")
+        timestamp = msg.get("timestamp", "")
+        # 既にHTMLとして整形済みの部分はそのまま、通常テキストはエスケープ
+        raw_message = str(msg.get("message", ""))
+        if raw_message.strip().startswith("<") and raw_message.strip().endswith(">"):
+            safe_message = raw_message
+        else:
+            safe_message = html.escape(raw_message).replace("\n", "<br>")
         
         if msg['type'] == 'user':
             chat_html += f'''
@@ -840,7 +846,7 @@ def display_chat_messages():
             <div class="timestamp">{timestamp}</div>
             '''
         elif msg['type'] == 'ohtani':
-            method_info = f' ({msg["method"]})' if msg.get("method") and msg["method"] != '初期メッセージ' else ''
+            method_info = f' ({msg.get("method")})' if msg.get("method") and msg.get("method") != '初期メッセージ' else ''
             chat_html += f'''
             <div class="ohtani-message-container">
                 <div class="ohtani-avatar">🐶</div>
@@ -848,8 +854,8 @@ def display_chat_messages():
             </div>
             <div class="timestamp">{timestamp}</div>
             '''
-            if method_info and msg["method"] != '初期メッセージ':
-                chat_html += f'<div class="system-message">{msg["method"]}</div>'
+            if method_info and msg.get("method") != '初期メッセージ':
+                chat_html += f'<div class="system-message">{html.escape(str(msg.get("method", "")))}</div>'
         elif msg['type'] == 'system':
             chat_html += f'<div class="system-message">{msg["message"]}</div>'
         elif msg['type'] == 'typing':
@@ -918,9 +924,8 @@ def show_chat_page():
     # チャット履歴初期化
     initialize_chat()
     
-    # ヘッダー
-    st.markdown('''
-    <div class="chat-app">
+    # ヘッダーHTML
+    header_html = '''
         <div class="chat-header">
             AI大谷とチャット
             <div class="status-indicator">
@@ -928,8 +933,7 @@ def show_chat_page():
                 オンライン
             </div>
         </div>
-    </div>
-    ''', unsafe_allow_html=True)
+    '''
     
     # サイドバー（設定）
     with st.sidebar:
@@ -1012,10 +1016,10 @@ def show_chat_page():
     
     rag = load_chat_rag()
     
-    # メインチャット画面
+    # メインチャット画面（ヘッダーと履歴を同コンテナで描画）
     with st.container():
-        # チャット履歴表示
-        st.markdown(display_chat_messages(), unsafe_allow_html=True)
+        combined_html = f'<div class="chat-app">{header_html}{display_chat_messages()}</div>'
+        st.markdown(combined_html, unsafe_allow_html=True)
     
     # クイック返信
     quick_reply = show_quick_replies()
@@ -1055,7 +1059,7 @@ def show_chat_page():
         # タイピング表示
         typing_placeholder = st.empty()
         with typing_placeholder:
-            typing_html = display_chat_messages() + '''
+            typing_inner = '''
             <div class="typing-container">
                 <div class="ohtani-avatar">🐶</div>
                 <div class="typing-indicator">
@@ -1068,7 +1072,11 @@ def show_chat_page():
                 </div>
             </div>
             '''
-            st.markdown(typing_html, unsafe_allow_html=True)
+            body_html = display_chat_messages()
+            if body_html.strip().endswith('</div>'):
+                body_html = body_html[:-6] + typing_inner + '</div>'
+            typing_full = f'<div class="chat-app">{header_html}{body_html}</div>'
+            st.markdown(typing_full, unsafe_allow_html=True)
         
         # 少し待機（リアル感演出）
         time.sleep(random.uniform(1.0, 2.0))
