@@ -296,13 +296,12 @@ def load_css():
     
     /* 入力エリア */
     .input-area {
-        background: transparent; /* 白い帯をなくす */
-        padding: 8px 8px;
+        background: #111827; /* ダーク背景 */
+        padding: 10px 12px;
         display: flex;
         align-items: center;
         gap: 10px;
-        box-shadow: none;
-        border-top: none;
+        border-top: 1px solid #1f2937;
         position: sticky;
         bottom: 0;
         z-index: 5;
@@ -310,32 +309,34 @@ def load_css():
     
     /* Streamlitの入力フィールドスタイル調整 */
     .stTextInput > div > div > input {
-        border-radius: 25px !important;
-        border: 1px solid #666 !important;
+        border-radius: 22px !important;
+        border: 1px solid #374151 !important;
+        background: #0b1220 !important;
+        color: #e5e7eb !important;
         padding: 12px 16px !important;
         font-size: 16px !important;
     }
     
     .stTextInput > div > div > input:focus {
-        border-color: #06c755 !important;
-        box-shadow: 0 0 0 2px rgba(6, 199, 85, 0.1) !important;
+        border-color: #10b981 !important;
+        box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.15) !important;
     }
     
     /* ボタンスタイル */
     .stButton > button {
-        background: #22c55e !important;
+        background: #10b981 !important;
         color: white !important;
         border: none !important;
-        border-radius: 20px !important;
+        border-radius: 22px !important;
         padding: 10px 20px !important;
         font-weight: 500 !important;
         transition: all 0.3s ease !important;
     }
     
     .stButton > button:hover {
-        background: #16a34a !important;
+        background: #0ea5a4 !important;
         transform: translateY(-1px) !important;
-        box-shadow: 0 4px 12px rgba(34, 197, 94, 0.3) !important;
+        box-shadow: 0 4px 12px rgba(14, 165, 164, 0.3) !important;
     }
     
     /* サイドバー非表示 */
@@ -777,7 +778,7 @@ class OhtaniChatRAG:
         「そこは、もう切り替えて」「次の機会に」
         「チームが勝つことが一番なので」「できることは全部やる」「もちろん」
     4. 特徴的な文末パターン
-        「〜という感じです」「〜かなと思います」
+        「〜という感じじゃないかなと思います」「〜かなと思います」
         「〜んじゃないかなと思います」
 
 質問: {query}
@@ -1041,11 +1042,11 @@ def show_chat_page():
 
     render_chat(display_chat_messages())
     
-    # クイック返信
-    quick_reply = show_quick_replies()
-    if quick_reply:
-        st.session_state.user_input = quick_reply
-        st.rerun()
+    # クイック返信（非表示化）
+    # quick_reply = show_quick_replies()
+    # if quick_reply:
+    #     st.session_state.user_input = quick_reply
+    #     st.rerun()
     
     # 入力エリア
     st.markdown('<div class="input-area">', unsafe_allow_html=True)
