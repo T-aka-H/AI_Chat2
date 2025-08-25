@@ -3,6 +3,7 @@ streamlit
 pandas
 numpy  # 基本的な配列操作のみ
 google-generativeai  # またはopenai
+pytz  # 日本時間対応
 
 # scikit-learn削除により：
 # - 起動時間: 5分 → 30秒
