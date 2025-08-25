@@ -838,22 +838,19 @@ def display_chat_messages():
             safe_message = html.escape(raw_message).replace("\n", "<br>")
         
         if msg['type'] == 'user':
-            chat_html += f'''
-            <div class="user-message-container">
-                <div class="user-message">{safe_message}</div>
-                <div class="user-avatar">YOU</div>
-            </div>
-            <div class="timestamp">{timestamp}</div>
-            '''
+            # メッセージの中身にHTMLタグを含む場合でも、チャットのHTMLは固定構造として出力
+            chat_html += '<div class="user-message-container">'
+            chat_html += f'<div class="user-message">{safe_message}</div>'
+            chat_html += '<div class="user-avatar">YOU</div>'
+            chat_html += '</div>'
+            chat_html += f'<div class="timestamp">{timestamp}</div>'
         elif msg['type'] == 'ohtani':
             method_info = f' ({msg.get("method")})' if msg.get("method") and msg.get("method") != '初期メッセージ' else ''
-            chat_html += f'''
-            <div class="ohtani-message-container">
-                <div class="ohtani-avatar">🐶</div>
-                <div class="ohtani-message">{safe_message}</div>
-            </div>
-            <div class="timestamp">{timestamp}</div>
-            '''
+            chat_html += '<div class="ohtani-message-container">'
+            chat_html += '<div class="ohtani-avatar">🐶</div>'
+            chat_html += f'<div class="ohtani-message">{safe_message}</div>'
+            chat_html += '</div>'
+            chat_html += f'<div class="timestamp">{timestamp}</div>'
             if method_info and msg.get("method") != '初期メッセージ':
                 chat_html += f'<div class="system-message">{html.escape(str(msg.get("method", "")))}</div>'
         elif msg['type'] == 'system':
@@ -925,15 +922,15 @@ def show_chat_page():
     initialize_chat()
     
     # ヘッダーHTML
-    header_html = '''
-        <div class="chat-header">
-            AI大谷とチャット
-            <div class="status-indicator">
-                <div class="online-dot"></div>
-                オンライン
-            </div>
+    header_html = textwrap.dedent('''
+    <div class="chat-header">
+        AI大谷とチャット
+        <div class="status-indicator">
+            <div class="online-dot"></div>
+            オンライン
         </div>
-    '''
+    </div>
+    ''')
     
     # サイドバー（設定）
     with st.sidebar:
@@ -1059,7 +1056,7 @@ def show_chat_page():
         # タイピング表示
         typing_placeholder = st.empty()
         with typing_placeholder:
-            typing_inner = '''
+            typing_inner = textwrap.dedent('''
             <div class="typing-container">
                 <div class="ohtani-avatar">🐶</div>
                 <div class="typing-indicator">
@@ -1071,7 +1068,7 @@ def show_chat_page():
                     </div>
                 </div>
             </div>
-            '''
+            ''')
             body_html = display_chat_messages()
             if body_html.strip().endswith('</div>'):
                 body_html = body_html[:-6] + typing_inner + '</div>'
