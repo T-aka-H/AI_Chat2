@@ -14,6 +14,19 @@ from datetime import datetime
 import pytz
 import html
 import textwrap
+import base64
+
+# アイコン画像のbase64エンコード
+@st.cache_data
+def get_icon_base64() -> str:
+    """icon.pngをbase64エンコードして返す"""
+    try:
+        with open('icon.png', 'rb') as f:
+            encoded = base64.b64encode(f.read()).decode()
+            return f"data:image/png;base64,{encoded}"
+    except FileNotFoundError:
+        # フォールバック: デフォルトアイコン（竹野のイニシャル）
+        return None
 
 # ページナビゲーション（簡易版）
 def show_page_navigation() -> str:
@@ -1135,6 +1148,9 @@ def display_chat_messages():
     """チャット履歴を表示"""
     chat_html = '<div class="chat-background">'
     
+    # アイコンのbase64データを取得
+    icon_base64 = get_icon_base64()
+    
     for i, msg in enumerate(st.session_state.chat_history):
         timestamp = msg.get("timestamp", "")
         # 既にHTMLとして整形済みの部分はそのまま、通常テキストはエスケープ
@@ -1153,7 +1169,10 @@ def display_chat_messages():
             chat_html += f'<div class="timestamp">{timestamp}</div>'
         elif msg['type'] == 'ohtani':
             chat_html += '<div class="ohtani-message-container">'
-            chat_html += '<div class="ohtani-avatar"><img src="icon.png" alt="竹野アイコン"></div>'
+            if icon_base64:
+                chat_html += f'<div class="ohtani-avatar"><img src="{icon_base64}" alt="竹野アイコン"></div>'
+            else:
+                chat_html += '<div class="ohtani-avatar">竹</div>'
             chat_html += f'<div class="ohtani-message">{safe_message}</div>'
             chat_html += '</div>'
             # 検索方法を時間の前に表示
@@ -1163,9 +1182,13 @@ def display_chat_messages():
         elif msg['type'] == 'system':
             chat_html += f'<div class="system-message">{msg["message"]}</div>'
         elif msg['type'] == 'typing':
+            if icon_base64:
+                avatar_html = f'<img src="{icon_base64}" alt="竹野アイコン">'
+            else:
+                avatar_html = '竹'
             chat_html += f'''
             <div class="typing-container">
-                <div class="ohtani-avatar"><img src="icon.png" alt="竹野アイコン"></div>
+                <div class="ohtani-avatar">{avatar_html}</div>
                 <div class="typing-indicator">
                     竹野さんが入力中
                     <div class="typing-dots">
@@ -1361,9 +1384,15 @@ def show_chat_page():
         add_message('user', user_input)
         
         # タイピング表示（同じプレースホルダを更新）
-        typing_inner = textwrap.dedent('''
+        icon_base64 = get_icon_base64()
+        if icon_base64:
+            avatar_html = f'<img src="{icon_base64}" alt="竹野アイコン">'
+        else:
+            avatar_html = '竹'
+        
+        typing_inner = f'''
             <div class="typing-container">
-                <div class="ohtani-avatar"><img src="icon.png" alt="竹野アイコン"></div>
+                <div class="ohtani-avatar">{avatar_html}</div>
                 <div class="typing-indicator">
                     竹野さんが入力中
                     <div class="typing-dots">
@@ -1373,7 +1402,7 @@ def show_chat_page():
                     </div>
                 </div>
             </div>
-        ''')
+        '''
         body_html = display_chat_messages()
         if body_html.strip().endswith('</div>'):
             body_html = body_html[:-6] + typing_inner + '</div>'
