@@ -1109,7 +1109,7 @@ def initialize_chat():
         # 最初の挨拶メッセージ
         st.session_state.chat_history.append({
             'type': 'ohtani',
-            'message': 'AI大谷です。チャットしなかったらしなかったで、みなさんうるさいですし、聞きたいことがあれば聞きます。',
+            'message': 'AI竹野です（今回はデモなので中身はAI大谷翔平です）。チャットしなかったらしなかったで、みなさんうるさいですし、聞きたいことがあれば聞きます。',
             'timestamp': datetime.now(pytz.timezone('Asia/Tokyo')).strftime('%H時%M分'),
             'method': '初期メッセージ'
         })
@@ -1159,7 +1159,7 @@ def display_chat_messages():
             <div class="typing-container">
                 <div class="ohtani-avatar">🐶</div>
                 <div class="typing-indicator">
-                    大谷選手が入力中
+                    竹野さんが入力中
                     <div class="typing-dots">
                         <div class="typing-dot"></div>
                         <div class="typing-dot"></div>
@@ -1264,13 +1264,7 @@ def show_chat_page():
         st.metric("👤 あなたの発言", user_messages)
         st.metric("🐶 竹野さんの返答", ohtani_messages)
         
-        # 今日の大谷情報（楽しい要素）
-        with st.expander("📊 今日の大谷選手"):
-            st.write("⚾ 練習: バッティング練習完了")
-            st.write("🏃 トレーニング: ランニング 5km")
-            st.write("📚 勉強: 英語学習 30分")
-            st.write("🐶 デコピン: お散歩済み")
-            st.write("😊 今日の気分: 絶好調！")
+
             
         with st.expander("💡 使い方のコツ"):
             st.markdown("""
@@ -1363,7 +1357,7 @@ def show_chat_page():
             <div class="typing-container">
                 <div class="ohtani-avatar">🐶</div>
                 <div class="typing-indicator">
-                    大谷選手が入力中
+                    竹野さんが入力中
                     <div class="typing-dots">
                         <div class="typing-dot"></div>
                         <div class="typing-dot"></div>
