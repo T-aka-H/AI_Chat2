@@ -10,14 +10,337 @@ from collections import Counter
 import math
 import time
 import requests
+from datetime import datetime
 
 # 設定
 st.set_page_config(
-    page_title="AI大谷 - 改善版",
-    layout="wide"
+    page_title="💬 大谷翔平チャット",
+    page_icon="⚾",
+    layout="wide",
+    initial_sidebar_state="collapsed"
 )
 
-# 軽量テキスト検索クラス（scikit-learn不要）
+# カスタムCSS - LINE風スタイル
+def load_css():
+    st.markdown("""
+    <style>
+    /* 全体の背景 */
+    .main .block-container {
+        max-width: 100% !important;
+        padding-top: 1rem !important;
+        padding-left: 1rem !important;
+        padding-right: 1rem !important;
+    }
+    
+    /* チャット画面全体 */
+    .chat-app {
+        display: flex;
+        flex-direction: column;
+        height: 80vh;
+        max-width: 800px;
+        margin: 0 auto;
+        background: white;
+        box-shadow: 0 0 20px rgba(0,0,0,0.1);
+        border-radius: 15px;
+        overflow: hidden;
+    }
+    
+    /* ヘッダー */
+    .chat-header {
+        background: linear-gradient(135deg, #007AFF, #5856D6);
+        color: white;
+        padding: 15px 20px;
+        text-align: center;
+        font-weight: bold;
+        font-size: 20px;
+        box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        position: relative;
+    }
+    
+    .status-indicator {
+        position: absolute;
+        right: 20px;
+        top: 50%;
+        transform: translateY(-50%);
+        font-size: 12px;
+        display: flex;
+        align-items: center;
+        gap: 5px;
+    }
+    
+    .online-dot {
+        width: 8px;
+        height: 8px;
+        background: #4CAF50;
+        border-radius: 50%;
+        animation: pulse 2s infinite;
+    }
+    
+    @keyframes pulse {
+        0% { opacity: 1; }
+        50% { opacity: 0.5; }
+        100% { opacity: 1; }
+    }
+    
+    /* チャット背景 - LINE風 */
+    .chat-background {
+        flex: 1;
+        background: #f8f9fa;
+        background-image: 
+            radial-gradient(circle at 20% 50%, rgba(120, 119, 198, 0.03) 0%, transparent 50%),
+            radial-gradient(circle at 80% 20%, rgba(120, 119, 198, 0.03) 0%, transparent 50%),
+            radial-gradient(circle at 40% 80%, rgba(120, 119, 198, 0.03) 0%, transparent 50%),
+            repeating-linear-gradient(
+                45deg,
+                transparent,
+                transparent 2px,
+                rgba(120, 119, 198, 0.02) 2px,
+                rgba(120, 119, 198, 0.02) 4px
+            );
+        padding: 20px;
+        overflow-y: auto;
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        max-height: 50vh;
+    }
+    
+    /* ユーザーメッセージ（右側・LINE緑） */
+    .user-message-container {
+        display: flex;
+        justify-content: flex-end;
+        align-items: flex-end;
+        gap: 10px;
+        margin: 5px 0;
+    }
+    
+    .user-message {
+        background: #06c755;
+        color: white;
+        padding: 12px 16px;
+        border-radius: 18px 18px 4px 18px;
+        max-width: 70%;
+        box-shadow: 0 1px 2px rgba(0,0,0,0.1);
+        font-size: 16px;
+        line-height: 1.4;
+        word-wrap: break-word;
+    }
+    
+    .user-avatar {
+        width: 35px;
+        height: 35px;
+        border-radius: 50%;
+        background: #06c755;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: white;
+        font-weight: bold;
+        font-size: 12px;
+        flex-shrink: 0;
+    }
+    
+    /* 大谷メッセージ（左側・白） */
+    .ohtani-message-container {
+        display: flex;
+        justify-content: flex-start;
+        align-items: flex-end;
+        gap: 10px;
+        margin: 5px 0;
+    }
+    
+    .ohtani-avatar {
+        width: 35px;
+        height: 35px;
+        border-radius: 50%;
+        background: linear-gradient(135deg, #E3F2FD, #BBDEFB);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 20px;
+        flex-shrink: 0;
+        border: 2px solid #90CAF9;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+    
+    .ohtani-message {
+        background: white;
+        color: #333;
+        padding: 12px 16px;
+        border-radius: 18px 18px 18px 4px;
+        max-width: 70%;
+        box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        font-size: 16px;
+        line-height: 1.4;
+        word-wrap: break-word;
+    }
+    
+    /* タイムスタンプ */
+    .timestamp {
+        font-size: 11px;
+        color: #999;
+        text-align: center;
+        margin: 5px 0;
+    }
+    
+    /* システムメッセージ */
+    .system-message {
+        background: rgba(0,0,0,0.05);
+        color: #666;
+        padding: 4px 8px;
+        border-radius: 8px;
+        text-align: center;
+        margin: 5px auto;
+        max-width: 200px;
+        font-size: 10px;
+        border: 1px solid rgba(0,0,0,0.05);
+    }
+    
+    /* タイピング表示 */
+    .typing-container {
+        display: flex;
+        align-items: flex-end;
+        gap: 10px;
+        margin: 5px 0;
+    }
+    
+    .typing-indicator {
+        background: white;
+        color: #999;
+        padding: 12px 16px;
+        border-radius: 18px 18px 18px 4px;
+        box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        animation: typing-pulse 1.5s ease-in-out infinite;
+        display: flex;
+        align-items: center;
+        gap: 5px;
+    }
+    
+    @keyframes typing-pulse {
+        0% { opacity: 0.6; }
+        50% { opacity: 1.0; }
+        100% { opacity: 0.6; }
+    }
+    
+    .typing-dots {
+        display: flex;
+        gap: 3px;
+    }
+    
+    .typing-dot {
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: #999;
+        animation: typing-bounce 1.4s ease-in-out infinite;
+    }
+    
+    .typing-dot:nth-child(1) { animation-delay: 0s; }
+    .typing-dot:nth-child(2) { animation-delay: 0.2s; }
+    .typing-dot:nth-child(3) { animation-delay: 0.4s; }
+    
+    @keyframes typing-bounce {
+        0%, 80%, 100% { transform: scale(0); }
+        40% { transform: scale(1); }
+    }
+    
+    /* クイック返信エリア */
+    .quick-replies {
+        background: #f8f9fa;
+        padding: 10px 15px;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        border-top: 1px solid #e9ecef;
+        min-height: 50px;
+        align-items: center;
+    }
+    
+    .quick-reply-btn {
+        background: white;
+        color: #666;
+        border: 1px solid #e9ecef;
+        padding: 6px 12px;
+        border-radius: 15px;
+        font-size: 13px;
+        cursor: pointer;
+        transition: all 0.3s ease;
+        white-space: nowrap;
+    }
+    
+    .quick-reply-btn:hover {
+        background: #06c755;
+        color: white;
+        border-color: #06c755;
+        transform: translateY(-1px);
+    }
+    
+    /* 入力エリア */
+    .input-area {
+        background: white;
+        padding: 15px 20px;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        box-shadow: 0 -2px 10px rgba(0,0,0,0.1);
+        border-top: 1px solid #e9ecef;
+    }
+    
+    /* Streamlitの入力フィールドスタイル調整 */
+    .stTextInput > div > div > input {
+        border-radius: 25px !important;
+        border: 1px solid #ddd !important;
+        padding: 12px 20px !important;
+        font-size: 16px !important;
+    }
+    
+    .stTextInput > div > div > input:focus {
+        border-color: #06c755 !important;
+        box-shadow: 0 0 0 2px rgba(6, 199, 85, 0.1) !important;
+    }
+    
+    /* ボタンスタイル */
+    .stButton > button {
+        background: #06c755 !important;
+        color: white !important;
+        border: none !important;
+        border-radius: 20px !important;
+        padding: 8px 20px !important;
+        font-weight: 500 !important;
+        transition: all 0.3s ease !important;
+    }
+    
+    .stButton > button:hover {
+        background: #05b04d !important;
+        transform: translateY(-1px) !important;
+        box-shadow: 0 4px 12px rgba(6, 199, 85, 0.3) !important;
+    }
+    
+    /* サイドバー非表示 */
+    .css-1d391kg {
+        display: none;
+    }
+    
+    /* レスポンシブ */
+    @media (max-width: 768px) {
+        .chat-app {
+            max-width: 100%;
+            height: 85vh;
+            border-radius: 0;
+        }
+        
+        .user-message, .ohtani-message {
+            max-width: 85%;
+        }
+        
+        .chat-background {
+            max-height: 60vh;
+        }
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
+# 軽量テキスト検索クラス
 class LightweightTextSearch:
     """軽量TF-IDF検索システム"""
     
@@ -102,7 +425,7 @@ class LightweightTextSearch:
         similarities.sort(key=lambda x: x[1], reverse=True)
         return similarities[:top_k]
 
-# 超軽量キーワード検索
+# キーワード検索
 class KeywordSearch:
     """軽量キーワードマッチング検索"""
     
@@ -144,12 +467,21 @@ class KeywordSearch:
         
         return results[:top_k]
 
-# メインRAGシステム
-class ImprovedOhtaniRAG:
-    """改善版大谷翔平RAGシステム"""
+# チャット用RAGシステム
+class OhtaniChatRAG:
+    """大谷翔平チャット用RAGシステム"""
     
-    def __init__(self, csv_path: str):
-        self.df = self._load_data(csv_path)
+    def __init__(self, csv_path_or_data):
+        if isinstance(csv_path_or_data, pd.DataFrame):
+            # DataFrameが渡された場合
+            self.df = csv_path_or_data
+        elif isinstance(csv_path_or_data, str):
+            # ファイルパスが渡された場合
+            self.df = self._load_data(csv_path_or_data)
+        else:
+            # Noneまたはその他の場合はサンプルデータ
+            self.df = self._create_chat_sample_data()
+        
         self.questions = self.df['Question'].fillna('').astype(str).tolist()
         self.answers = self.df['Answer'].fillna('').astype(str).tolist()
         
@@ -158,11 +490,11 @@ class ImprovedOhtaniRAG:
         self.keyword_search = KeywordSearch(self.questions)
         self.answer_search = KeywordSearch(self.answers)
         
-        # 大谷選手の話し方パターン（大幅拡張）
+        # 大谷選手の話し方パターン
         self.ohtani_patterns = self._extract_speech_patterns()
         
-        # トピック別回答テンプレート
-        self.topic_templates = self._create_topic_templates()
+        # チャット用の挨拶・相槌パターン
+        self.chat_patterns = self._create_chat_patterns()
     
     def _load_data(self, csv_path: str) -> pd.DataFrame:
         """データ読み込み"""
@@ -174,954 +506,597 @@ class ImprovedOhtaniRAG:
                     df = pd.read_csv(parent_path)
             return df
         except FileNotFoundError:
-            return self._create_expanded_sample_data()
+            return self._create_chat_sample_data()
     
-    def _create_expanded_sample_data(self) -> pd.DataFrame:
-        """拡張サンプルデータ（100件以上）"""
+    def _create_chat_sample_data(self) -> pd.DataFrame:
+        """チャット用サンプルデータ"""
         questions = [
+            # 挨拶・日常会話
+            'こんにちは', 'おはよう', '今日調子はどう？', 'お疲れさま',
+            '元気？', '最近どう？', 'こんばんは', 'おやすみ',
+            
             # 野球関連
-            '今シーズンの目標は何ですか？',
-            'バッティングで心がけていることは？',
-            'ピッチングで大切にしていることは？',
-            'チームの雰囲気はいかがですか？',
-            'プレッシャーを感じる時はありますか？',
-            'スランプの時はどう対処しますか？',
-            '好きな球場はありますか？',
-            '印象に残っている試合は？',
-            'ホームランを打った時の気持ちは？',
-            '完全試合に近づいた時の心境は？',
+            '今日の試合はどうだった？', 'バッティング調子どう？', 'ピッチングは？',
+            'チームの雰囲気は？', '今シーズンの目標は？', 'プレッシャー感じる？',
             
-            # プライベート・趣味
-            '趣味は何ですか？',
-            '好きな音楽はありますか？',
-            '愛用している物はありますか？',
-            '休日の過ごし方は？',
-            '好きな映画はありますか？',
-            'ゲームはしますか？',
-            '料理は作りますか？',
-            'ペットは飼っていますか？',
-            '読書はしますか？',
-            '車は好きですか？',
+            # プライベート
+            '今何してる？', '好きな食べ物は？', '趣味は何？', '休日は何してる？',
+            '映画は見る？', '音楽は聞く？', '日本が恋しい？', 'アメリカはどう？',
             
-            # 食べ物関連
-            '好きな日本料理は？',
-            'アメリカの食べ物で好きなものは？',
-            '苦手な食べ物はありますか？',
-            '試合前に食べるものは？',
-            'ホームシックになった時の食べ物は？',
-            '母親の手料理で好きなものは？',
-            'アメリカで驚いた食べ物は？',
-            '健康のために気をつけている食事は？',
+            # 励まし・応援
+            '頑張って！', '応援してるよ！', 'ファイト！', '負けないで！',
+            '素晴らしいプレーだった', 'すごいね！', '感動した！',
             
-            # トレーニング・健康
-            'トレーニングメニューについて教えてください',
-            '体調管理で気をつけていることは？',
-            'けがを予防するために何をしていますか？',
-            '筋トレで重視していることは？',
-            '睡眠時間はどのくらいですか？',
-            'ストレッチは毎日していますか？',
-            '疲労回復の方法は？',
-            'メンタルトレーニングはしていますか？',
-            
-            # 人間関係・コミュニケーション
-            'チームメイトとはどう接していますか？',
-            'コーチとの関係について教えてください',
-            'ファンとの交流で印象的なことは？',
-            '通訳の方との関係は？',
-            '家族との連絡頻度は？',
-            '友人とは連絡を取り合っていますか？',
-            'メディア対応で心がけていることは？',
-            
-            # 将来・目標
-            '10年後の自分をどう想像しますか？',
-            '引退後は何をしたいですか？',
-            '子供たちに伝えたいことは？',
-            '野球界に貢献したいことは？',
-            '日本球界復帰の可能性は？',
-            'コーチになりたいですか？',
-            
-            # 文化・比較
-            '日本とアメリカの野球の違いは？',
-            'アメリカ生活で困ったことは？',
-            '日本が恋しくなる時は？',
-            'アメリカで学んだことは？',
-            '両国の良いところは？',
-            '言葉の壁はありましたか？',
-            
-            # 哲学・価値観
-            '人生で大切にしていることは？',
-            '困難を乗り越える秘訣は？',
-            '成功の秘訣は何だと思いますか？',
-            '感謝していることは？',
-            '挑戦することの意味は？',
-            'プロとして心がけていることは？'
+            # 質問・相談
+            'どうしたらうまくなる？', '夢を叶える秘訣は？', '困った時はどうする？',
+            '野球の楽しさって？', 'プロになるには？', 'アドバイスください',
         ]
         
         answers = [
-            # 野球関連の回答
-            'そうですね、今シーズンはチーム一丸となってワールドシリーズ制覇を目指したいと思います。個人的にも、投打両方でチームに貢献できるよう、日々努力を続けています。',
-            'バッティングでは、相手投手をしっかりと研究して、状況に応じたアプローチを心がけています。特に、チャンスの場面では冷静さを保つことを大切にしています。',
-            'ピッチングでは、コントロールを第一に考えています。ストライクゾーンでの勝負を意識しながら、バッターとの駆け引きを楽しんでいます。',
-            'チームの雰囲気は本当に素晴らしいです。みんなが同じ目標に向かって努力していて、お互いを高め合える関係を築けています。',
-            'プレッシャーは感じますが、それを楽しめるようになりました。大舞台でプレーできることに感謝して、リラックスして臨んでいます。',
-            'スランプの時は、基本に立ち戻ることを心がけています。焦らずに、一つ一つの動作を丁寧に確認し直すようにしています。',
-            'どの球場も特色があって素晴らしいですが、やはりホーム球場でプレーする時は特別な気持ちになりますね。ファンの皆さんの声援が力になります。',
-            '初めてメジャーでホームランを打った試合は今でも鮮明に覚えています。夢が現実になった瞬間でした。',
-            'ホームランを打った瞬間は、やはり嬉しいですね。でも、それよりもチームの勝利に貢献できたことが一番嬉しいです。',
-            '完全試合に近づいた時は、集中力を切らさないよう注意していました。一球一球に集中することだけを考えていました。',
+            # 挨拶・日常会話の返答
+            'こんにちは！今日も一日頑張りましょう！', 'おはようございます！今日もよろしくお願いします',
+            '今日はとても調子がいいです！ありがとうございます', 'お疲れさまです！今日も頑張りました',
+            'はい、おかげさまで元気です！', '最近は充実した日々を送れています',
+            'こんばんは！今日も一日お疲れさまでした', 'おやすみなさい、良い夢を！',
             
-            # プライベート・趣味の回答
-            'オフの時間は映画を見たり、音楽を聴いたりしてリラックスしています。新しいことを学ぶのも好きですね。',
-            '音楽はジャンルを問わず聞きますが、リラックスできるクラシックや、元気が出るポップスも好きです。',
-            '野球道具にはこだわりがありますね。グローブやバットは自分の体の一部のような存在です。大切に手入れしています。',
-            '休日は散歩をしたり、自然の中で過ごすことが多いです。心をリフレッシュできる時間を大切にしています。',
-            'アクション映画やヒューマンドラマが好きですね。感動できる作品に出会うと、とても勉強になります。',
-            'ゲームもたまにしますが、あまり長時間はやりません。適度にリフレッシュできる程度に楽しんでいます。',
-            '簡単な料理なら作ります。特に和食を作ると、日本を思い出してほっとしますね。',
-            '今はペットは飼っていませんが、将来的には考えているかもしれません。動物は癒されますね。',
-            '読書もします。自己啓発本やスポーツ関連の本をよく読みます。新しい知識を得るのが楽しいです。',
-            '車は好きですね。運転している時は集中できるし、良い気分転換になります。',
+            # 野球関連の返答
+            '今日の試合はチーム一丸となって戦えました', 'バッティングは日々の積み重ねが大切ですね',
+            'ピッチングでは一球一球集中しています', 'チームの雰囲気は本当に素晴らしいです',
+            '今シーズンはチーム優勝を目指しています', 'プレッシャーも楽しみの一つだと思います',
             
-            # その他のカテゴリも同様に拡張...
+            # プライベートの返答
+            '今はリラックスしながら本を読んでいます', '和食、特にお母さんの手料理が恋しいです',
+            '読書や映画鑑賞が好きですね', '休日は自然の中で過ごすことが多いです',
+            'はい、時間がある時は映画を見ます', '音楽を聞いてリラックスしています',
+            '日本の家族や友人が恋しいですね', 'アメリカでも多くのことを学んでいます',
+            
+            # 励まし・応援への返答
+            'ありがとうございます！頑張ります！', '応援してくださって本当にありがとうございます！',
+            'その言葉が力になります！', '皆さんの応援があるからこそです',
+            'そう言ってもらえて嬉しいです', 'ありがとうございます！とても励みになります',
+            '感動していただけて光栄です',
+            
+            # 質問・相談への返答
+            '毎日の積み重ねが一番大切だと思います', '夢を持ち続けることが何より大切です',
+            '困った時は基本に立ち返ることを心がけています', '野球は人と人をつなぐ素晴らしいスポーツです',
+            'プロになるには、まず野球を心から楽しむことです', '常に謙虚さを忘れずに努力することが大切です',
         ]
         
-        # 残りのデータを生成（合計100件以上になるように）
-        while len(questions) < 100:
-            # 既存の質問のバリエーションを作成
-            base_questions = questions[:20]  # 最初の20個をベースに
-            for q in base_questions:
-                # 質問のバリエーションを作成
-                variations = [
-                    q.replace('？', 'について詳しく教えてください'),
-                    q.replace('ますか', 'ますでしょうか'),
-                    f"{q[:-1]}に関してはいかがですか？"
-                ]
-                for var in variations:
-                    if len(questions) < 100 and var not in questions:
-                        questions.append(var)
-                        # 対応する回答も追加（既存回答のバリエーション）
-                        base_answer = answers[len(answers) % len(base_questions)]
-                        answers.append(f"{base_answer} より詳しくお話しすると、常に学び続ける姿勢を大切にしています。")
+        # データを同じ長さに調整
+        max_len = max(len(questions), len(answers))
+        while len(questions) < max_len:
+            questions.extend(questions[:max_len-len(questions)])
+        while len(answers) < max_len:
+            answers.extend(answers[:max_len-len(answers)])
         
         return pd.DataFrame({
             'ID': range(1, len(questions) + 1),
-            'Question': questions,
-            'Answer': answers
+            'Question': questions[:max_len],
+            'Answer': answers[:max_len]
         })
     
     def _extract_speech_patterns(self) -> Dict:
-        """大幅拡張された話し方パターン"""
+        """チャット向け話し方パターン"""
         return {
-            'starters': [
-                'そうですね', 'うーん', 'やっぱり', 'まあ', 'えーと',
-                'そうですね...', 'んー', '実は', '正直に言うと',
-                'いつも思うのは', '個人的には', 'これまでの経験から'
-            ],
-            'endings': [
-                'と思います', 'かなと思います', 'じゃないかなと', 'ですね',
-                'と感じています', 'と考えています', 'というのが正直なところです',
-                'のかなと思います', 'と思っているんです', 'というふうに思います'
-            ],
-            'values': [
-                '感謝', 'チーム', '成長', '挑戦', '継続', '努力', '学び',
-                '仲間', '支え', '経験', '練習', '集中', '準備', '信頼'
-            ],
-            'humble': [
-                'まだまだ', '勉強になります', 'ありがたい', 'おかげで',
-                '至らないところも', '完璧ではありませんが', '日々勉強です',
-                '皆さんのおかげで', 'まだ足りない部分も'
-            ],
-            'topics': {
-                '野球': ['プレー', 'チーム', '練習', '試合', '技術', '戦術'],
-                '食べ物': ['美味しい', '栄養', '健康', '日本の味', '新鮮'],
-                '趣味': ['楽しい', 'リラックス', '気分転換', '新しい発見'],
-                '人間関係': ['信頼', '支え', '感謝', '絆', 'コミュニケーション'],
-                '将来': ['目標', '夢', '挑戦', '成長', '貢献']
-            }
+            'greetings': {
+                'morning': ['おはようございます！', 'おはよう！今日もよろしく！'],
+                'day': ['こんにちは！', 'こんにちは！調子はどうですか？'],
+                'evening': ['こんばんは！', 'こんばんは！お疲れさまでした'],
+                'night': ['おやすみなさい！', 'おやすみ！良い夢を']
+            },
+            'starters': ['そうですね', 'うーん', 'あー', 'そうそう', 'なるほど', '実は'],
+            'endings': ['です！', 'ですね', 'と思います', 'かな', 'よ', 'かもしれません'],
+            'reactions': ['それはいいですね！', 'わかります！', 'そうなんです', 'なるほど！'],
+            'emotions': ['嬉しいです', '楽しいですね', 'ありがたいです', '感謝しています'],
+            'casual': ['はい', 'そう', 'うん', 'なるほど', 'わかりました', 'そうかも']
         }
     
-    def _create_topic_templates(self) -> Dict:
-        """トピック別の回答テンプレート"""
+    def _create_chat_patterns(self) -> Dict:
+        """チャット特有のパターン"""
         return {
-            '野球': [
-                "{starter}、野球に関しては{value}を大切にしながら取り組んでいます{ending}。",
-                "野球については、{humble}ですが、{value}することを心がけています{ending}。",
-                "{starter}、これまでの経験から言うと、{value}が一番大切{ending}。"
+            'quick_responses': [
+                'そうなんです！', 'ありがとうございます！', 'なるほど！', 
+                'わかります！', 'その通りです！', 'いいですね！'
             ],
-            '食べ物': [
-                "{starter}、食事に関しては体のことを考えて{value}を意識しています{ending}。",
-                "食べ物については、{value}なものを選ぶようにしています{ending}。",
-                "{starter}、{value}な食事を心がけることで、コンディション維持につながる{ending}。"
-            ],
-            '趣味': [
-                "{starter}、{value}な時間を過ごすことで、良いリフレッシュになります{ending}。",
-                "趣味については、{value}ことを大切にしています{ending}。",
-                "{starter}、オフの時間は{value}を心がけています{ending}。"
-            ],
-            '人間関係': [
-                "{starter}、{value}を基盤にした関係づくりを心がけています{ending}。",
-                "人との関係では、{value}が一番大切{ending}。",
-                "{starter}、{humble}ですが、{value}することを意識しています{ending}。"
-            ],
-            '将来': [
-                "{starter}、将来に向けては{value}を持って取り組んでいきたい{ending}。",
-                "これからについては、{value}し続けることが大切{ending}。",
-                "{starter}、{value}という気持ちを忘れずに歩んでいきたい{ending}。"
-            ]
+            'thinking': ['うーん...', 'そうですね...', 'どうでしょう...'],
+            'agreement': ['はい！', 'そうです！', 'その通り！', '同感です！'],
+            'encouragement': ['頑張って！', 'ファイト！', '応援しています！', '大丈夫！']
         }
     
-    def _detect_topic(self, query: str) -> str:
-        """質問のトピックを判定"""
-        keywords = {
-            '野球': ['野球', '試合', 'バッティング', 'ピッチング', 'チーム', 'プレー', '練習', 'スランプ', 'ホームラン'],
-            '食べ物': ['食べ物', '料理', '食事', '好き', 'うまい', '美味しい', 'グルメ', '栄養'],
-            '趣味': ['趣味', '映画', '音楽', '読書', 'ゲーム', '休日', 'オフ', 'リラックス'],
-            '人間関係': ['チームメイト', 'ファン', 'コーチ', '家族', '友人', '関係', '交流', 'コミュニケーション'],
-            '将来': ['将来', '目標', '夢', '引退', '10年後', 'これから', '今後']
-        }
+    def chat_search(self, query: str, ai_provider: str = None, api_key: str = None) -> Dict:
+        """チャット用検索（簡略化）"""
         
-        query_lower = query.lower()
-        topic_scores = {}
+        # 挨拶の検出
+        if self._is_greeting(query):
+            return self._handle_greeting(query)
         
-        for topic, topic_keywords in keywords.items():
-            score = sum(1 for keyword in topic_keywords if keyword in query_lower)
-            if score > 0:
-                topic_scores[topic] = score
+        # 短い返事の検出
+        if self._is_short_response(query):
+            return self._handle_short_response(query)
         
-        if topic_scores:
-            return max(topic_scores.items(), key=lambda x: x[1])[0]
-        return '一般'
-    
-    def _generate_improved_pattern_response(self, query: str) -> str:
-        """改善されたパターン生成"""
-        topic = self._detect_topic(query)
+        # 通常のRAG検索
+        threshold = 0.1  # チャット用により低い閾値
         
-        if topic in self.topic_templates:
-            template = random.choice(self.topic_templates[topic])
-            starter = random.choice(self.ohtani_patterns['starters'])
-            ending = random.choice(self.ohtani_patterns['endings'])
-            
-            # トピックに関連する価値観を選択
-            if topic in self.ohtani_patterns['topics']:
-                value = random.choice(self.ohtani_patterns['topics'][topic])
-            else:
-                value = random.choice(self.ohtani_patterns['values'])
-            
-            humble = random.choice(self.ohtani_patterns['humble'])
-            
-            return template.format(
-                starter=starter,
-                ending=ending,
-                value=value,
-                humble=humble
-            )
-        
-        # 一般的な回答
-        starter = random.choice(self.ohtani_patterns['starters'])
-        ending = random.choice(self.ohtani_patterns['endings'])
-        value = random.choice(self.ohtani_patterns['values'])
-        
-        general_templates = [
-            f"{starter}、それについては{value}を大切にしながら向き合っています{ending}。",
-            f"{query}に関しては、日々{value}することを心がけています{ending}。",
-            f"{starter}、{value}という気持ちを持って取り組んでいます{ending}。"
-        ]
-        
-        return random.choice(general_templates)
-    
-    def search(self, query: str, method: str = 'hybrid', threshold: float = 0.15, ai_provider: str = None, api_key: str = None) -> Dict:
-        """改善されたRAG検索システム（Layer 5でのAI生成優先）"""
-        
-        search_results = []
-        
-        # Layer 1: TF-IDF検索（質問空間）
-        if method in ['tfidf', 'hybrid']:
-            tfidf_results = self.tfidf_search.search(query, top_k=3)
-            if tfidf_results and tfidf_results[0][1] >= threshold:
-                idx, score = tfidf_results[0]
-                search_results = tfidf_results
-                return {
-                    'layer': 1,
-                    'method': 'TF-IDF RAG',
-                    'confidence': 'high' if score > 0.4 else 'medium',
-                    'response': self.answers[idx],
-                    'source': f"RAG検索 - ID {self.df.iloc[idx]['ID']}: {self.questions[idx][:50]}...",
-                    'score': float(score),
-                    'search_results': search_results,
-                    'retrieved_docs': self._format_retrieved_docs(tfidf_results),
-                    'needs_ai': False
-                }
-        
-        # Layer 2: キーワード検索（質問空間）
-        if method in ['keyword', 'hybrid']:
-            keyword_results = self.keyword_search.search(query, top_k=3)
-            if keyword_results and keyword_results[0][1] >= threshold * 0.5:
-                idx, score = keyword_results[0]
-                search_results = keyword_results
-                return {
-                    'layer': 2,
-                    'method': 'キーワードRAG',
-                    'confidence': 'medium',
-                    'response': self.answers[idx],
-                    'source': f"RAG検索 - ID {self.df.iloc[idx]['ID']}: {self.questions[idx][:50]}...",
-                    'score': float(score),
-                    'search_results': search_results,
-                    'retrieved_docs': self._format_retrieved_docs(keyword_results),
-                    'needs_ai': False
-                }
-        
-        # Layer 3: 回答空間検索
-        answer_results = self.answer_search.search(query, top_k=3)
-        if answer_results and answer_results[0][1] >= threshold * 0.3:
-            idx, score = answer_results[0]
-            search_results = answer_results
+        # TF-IDF検索
+        tfidf_results = self.tfidf_search.search(query, top_k=3)
+        if tfidf_results and tfidf_results[0][1] >= threshold:
+            idx, score = tfidf_results[0]
             return {
-                'layer': 3,
-                'method': '回答空間RAG',
-                'confidence': 'medium',
-                'response': self.answers[idx],
-                'source': f"RAG検索 - ID {self.df.iloc[idx]['ID']}: 回答から検索",
-                'score': float(score),
-                'search_results': search_results,
-                'retrieved_docs': self._format_retrieved_docs(answer_results, answer_space=True),
-                'needs_ai': False
+                'method': 'RAG検索',
+                'response': self._make_chat_friendly(self.answers[idx]),
+                'confidence': 'high' if score > 0.3 else 'medium',
+                'needs_ai': bool(ai_provider and api_key and score < 0.2)
             }
         
-        # Layer 4: 複数文書を統合してRAG生成
-        all_results = self.keyword_search.search(query, top_k=5)
-        if all_results and all_results[0][1] >= 0.1:  # さらに低い閾値
-            search_results = all_results
-            aggregated_context = self._aggregate_multiple_docs(all_results[:3])
+        # キーワード検索
+        keyword_results = self.keyword_search.search(query, top_k=3)
+        if keyword_results and keyword_results[0][1] >= threshold:
+            idx, score = keyword_results[0]
             return {
-                'layer': 4,
-                'method': '複数文書RAG',
+                'method': 'キーワード検索',
+                'response': self._make_chat_friendly(self.answers[idx]),
                 'confidence': 'medium',
-                'response': aggregated_context,
-                'source': f"RAG検索 - {len(all_results)}件の文書から統合生成",
-                'score': float(all_results[0][1]) if all_results else 0.1,
-                'search_results': search_results,
-                'retrieved_docs': self._format_retrieved_docs(all_results),
-                'needs_ai': False
+                'needs_ai': bool(ai_provider and api_key)
             }
         
-        # Layer 5: AI生成優先（RAG情報なしの新しい質問）
-        # ここでAI APIが利用可能ならAI生成、そうでなければパターン生成
+        # AI生成が必要
         if ai_provider and api_key:
-            # AI生成用のコンテキストを準備（RAG情報なしver）
-            ai_context = self.prepare_no_rag_ai_context(query)
             return {
-                'layer': 5,
-                'method': 'AI生成（新規質問）',
+                'method': 'AI生成',
+                'response': None,
                 'confidence': 'medium',
-                'response': None,  # AI生成で後から設定
-                'source': f'AI生成 - 新しい質問（トピック: {self._detect_topic(query)}）',
-                'score': 0.2,  # AI生成なので少し高めのスコア
-                'search_results': [],
-                'retrieved_docs': [],
                 'needs_ai': True,
-                'ai_context': ai_context
+                'ai_context': self._prepare_chat_ai_context(query)
             }
+        
+        # フォールバック
+        return {
+            'method': 'パターン生成',
+            'response': self._generate_chat_response(query),
+            'confidence': 'low',
+            'needs_ai': False
+        }
+    
+    def _is_greeting(self, query: str) -> bool:
+        """挨拶かどうかを判定"""
+        greetings = ['こんにちは', 'おはよう', 'こんばんは', 'はじめまして', 'よろしく', 'おやすみ']
+        return any(greeting in query.lower() for greeting in greetings)
+    
+    def _handle_greeting(self, query: str) -> Dict:
+        """挨拶への対応"""
+        current_hour = datetime.now().hour
+        
+        if 'おはよう' in query:
+            response = random.choice(self.ohtani_patterns['greetings']['morning'])
+        elif 'こんばんは' in query or 'おやすみ' in query:
+            response = random.choice(self.ohtani_patterns['greetings']['evening'])
         else:
-            # AI APIが利用できない場合のフォールバック
-            generated_response = self._generate_improved_pattern_response(query)
-            return {
-                'layer': 5,
-                'method': '改善パターン生成',
-                'confidence': 'low',
-                'response': generated_response,
-                'source': f'パターン生成（トピック: {self._detect_topic(query)}）- APIキー未設定',
-                'score': 0.1,
-                'search_results': [],
-                'retrieved_docs': [],
-                'needs_ai': False
-            }
+            response = random.choice(self.ohtani_patterns['greetings']['day'])
+        
+        return {
+            'method': '挨拶対応',
+            'response': response,
+            'confidence': 'high',
+            'needs_ai': False
+        }
     
-    def _format_retrieved_docs(self, results: List[Tuple[int, float]], answer_space: bool = False) -> List[Dict]:
-        """検索された文書の整形"""
-        docs = []
-        for idx, score in results:
-            docs.append({
-                'id': int(self.df.iloc[idx]['ID']),
-                'question': self.questions[idx],
-                'answer': self.answers[idx],
-                'score': float(score),
-                'search_type': '回答空間' if answer_space else '質問空間'
-            })
-        return docs
+    def _is_short_response(self, query: str) -> bool:
+        """短い返事かどうかを判定"""
+        short_patterns = ['はい', 'うん', 'そう', 'なるほど', 'わかった', 'ありがとう', 'すごい']
+        return len(query) <= 10 and any(pattern in query.lower() for pattern in short_patterns)
     
-    def _aggregate_multiple_docs(self, results: List[Tuple[int, float]]) -> str:
-        """複数文書からの情報統合（RAGの真価）- 改善版"""
-        if not results:
-            return self._generate_improved_pattern_response("一般的な質問")
+    def _handle_short_response(self, query: str) -> Dict:
+        """短い返事への対応"""
+        if 'ありがとう' in query:
+            response = 'こちらこそ、ありがとうございます！'
+        elif 'すごい' in query or '素晴らしい' in query:
+            response = 'そう言ってもらえて嬉しいです！'
+        else:
+            response = random.choice(self.chat_patterns['quick_responses'])
         
-        # 関連する複数の回答を取得
-        relevant_answers = []
-        for idx, score in results:
-            if score > 0.05:  # より低い閾値で多くの文書を活用
-                relevant_answers.append(self.answers[idx])
+        return {
+            'method': '短文対応',
+            'response': response,
+            'confidence': 'high',
+            'needs_ai': False
+        }
+    
+    def _make_chat_friendly(self, response: str) -> str:
+        """回答をチャット向けにフレンドリーに"""
+        # 長い文を短縮
+        if len(response) > 100:
+            sentences = response.split('。')
+            response = sentences[0] + '。'
         
-        if not relevant_answers:
-            return self._generate_improved_pattern_response("一般的な質問")
+        # より親しみやすい表現に
+        response = response.replace('と思います', 'と思いますよ')
+        response = response.replace('ですね', 'ですね！')
         
-        # 複数回答から共通要素を抽出して統合
-        combined_keywords = []
-        for answer in relevant_answers:
-            keywords = re.findall(r'[\w\u3040-\u309f\u30a0-\u30ff\u4e00-\u9fff]+', answer)
-            combined_keywords.extend(keywords)
-        
-        # 頻出キーワードを特定
-        keyword_freq = Counter(combined_keywords)
-        top_keywords = [k for k, v in keyword_freq.most_common(8) if v > 1 and len(k) > 1]
-        
-        # より自然な統合回答生成
+        return response
+    
+    def _generate_chat_response(self, query: str) -> str:
+        """チャット向けパターン生成"""
         starter = random.choice(self.ohtani_patterns['starters'])
         ending = random.choice(self.ohtani_patterns['endings'])
         
-        if top_keywords:
-            # キーワードから適切な価値観を選択
-            values_in_keywords = [k for k in top_keywords if k in self.ohtani_patterns['values']]
-            if values_in_keywords:
-                main_value = values_in_keywords[0]
-            else:
-                main_value = random.choice(self.ohtani_patterns['values'])
-            
-            # より具体的で自然な回答を生成
-            templates = [
-                f"{starter}、それについては{main_value}を大切にしながら、これまでの経験を活かして取り組んでいます。複数の場面で学んだことを総合すると、やはり継続することが重要{ending}。",
-                f"{main_value}に関しては、いろいろな経験から学ばせていただきました。{starter}、今思うのは、一つ一つの積み重ねが大きな成果につながるということ{ending}。",
-                f"{starter}、{main_value}という点では、チームメイトや周りの方々からも多くのことを教わりました。そういった経験を大切にしながら、これからも成長していきたい{ending}。"
-            ]
-        else:
-            templates = [
-                f"{starter}、その件については、日々の経験を通じて学んでいることが多いです。まだまだ勉強中ですが、前向きに取り組んでいきたい{ending}。",
-                f"それについては、これまでいろいろな場面で考えさせられました。{starter}、自分なりに答えを見つけながら、成長していければと思っています{ending}。"
-            ]
+        templates = [
+            f"{starter}、それは面白い質問ですね！",
+            f"いい質問{ending}！",
+            f"{starter}、そのことについて考えてみますね",
+            f"なるほど、{query}について{ending}",
+        ]
         
         return random.choice(templates)
     
-    def prepare_ai_context(self, query: str, search_results: List[Tuple[int, float]]) -> str:
-        """AI生成用コンテキスト準備 - 改善版（RAGありの場合）"""
-        context_parts = []
-        
-        if search_results:
-            context_parts.append("【参考となる大谷選手の過去の発言】")
-            for i, (idx, score) in enumerate(search_results[:4], 1):  # より多くの参考資料
-                context_parts.append(f"{i}. Q: {self.questions[idx]}")
-                context_parts.append(f"   A: {self.answers[idx]}")
-                context_parts.append(f"   類似度: {score:.3f}")
-            context_parts.append("")
-        
-        # より詳細な話し方の特徴
-        context_parts.extend([
-            "【大谷翔平選手の話し方の詳細な特徴】",
-            "- 謙虚で丁寧な口調（「そうですね」「と思います」「まだまだ」をよく使う）",
-            "- チームメイトや周りの人への感謝を常に表現",
-            "- 成長・学び・継続・努力を大切にする姿勢",
-            "- 前向きで誠実、時に照れるような素直な答え方",
-            "- 野球での具体的な経験を交えながら答える",
-            "- 困難な質問にも真摯に向き合う姿勢",
-            "- 未来に向けての建設的な考え方",
-            "",
-            f"質問のトピック: {self._detect_topic(query)}",
-            f"質問: {query}",
-            "",
-            "【指示】",
-            "あなたは大谷翔平選手として、上記の参考発言と話し方の特徴を活かして、",
-            "自然で温かみのある回答を200-300文字で作成してください。",
-            "参考資料の内容を踏まえつつ、質問に対して大谷選手らしい誠実で前向きな回答をしてください：",
-        ])
-        
-        return "\n".join(context_parts)
+    def _prepare_chat_ai_context(self, query: str) -> str:
+        """チャット用AI生成コンテキスト"""
+        return f"""
+あなたは大谷翔平選手として、友達とチャットするような親しみやすい口調で回答してください。
 
-    def prepare_no_rag_ai_context(self, query: str) -> str:
-        """Layer 5用：RAG情報なしでのAI生成コンテキスト（80文字回答用）"""
-        topic = self._detect_topic(query)
-        
-        context_parts = [
-            "【大谷翔平選手として回答してください】",
-            "",
-            "【話し方の特徴】",
-            "- 謙虚で丁寧（「そうですね」「と思います」）",
-            "- 感謝の気持ちを表現",
-            "- 前向きで誠実",
-            "- 成長・努力・チームワークを重視",
-            "",
-            f"質問のトピック: {topic}",
-            f"質問: {query}",
-            "",
-            "【重要な指示】",
-            "- 大谷翔平選手として自然に回答",
-            "- 日本語で70-90文字程度の簡潔な回答",
-            "- 謙虚さと前向きさを含めて",
-            "- 具体的すぎる情報は避けて一般的な姿勢で答える",
-            "",
-            "回答："
-        ]
-        
-        return "\n".join(context_parts)
-        """AI生成用コンテキスト準備 - 改善版"""
-        context_parts = []
-        
-        if search_results:
-            context_parts.append("【参考となる大谷選手の過去の発言】")
-            for i, (idx, score) in enumerate(search_results[:4], 1):  # より多くの参考資料
-                context_parts.append(f"{i}. Q: {self.questions[idx]}")
-                context_parts.append(f"   A: {self.answers[idx]}")
-                context_parts.append(f"   類似度: {score:.3f}")
-            context_parts.append("")
-        
-        # より詳細な話し方の特徴
-        context_parts.extend([
-            "【大谷翔平選手の話し方の詳細な特徴】",
-            "- 謙虚で丁寧な口調（「そうですね」「と思います」「まだまだ」をよく使う）",
-            "- チームメイトや周りの人への感謝を常に表現",
-            "- 成長・学び・継続・努力を大切にする姿勢",
-            "- 前向きで誠実、時に照れるような素直な答え方",
-            "- 野球での具体的な経験を交えながら答える",
-            "- 困難な質問にも真摯に向き合う姿勢",
-            "- 未来に向けての建設的な考え方",
-            "",
-            f"質問のトピック: {self._detect_topic(query)}",
-            f"質問: {query}",
-            "",
-            "【指示】",
-            "あなたは大谷翔平選手として、上記の参考発言と話し方の特徴を活かして、",
-            "自然で温かみのある回答を200-300文字で作成してください。",
-            "参考資料の内容を踏まえつつ、質問に対して大谷選手らしい誠実で前向きな回答をしてください：",
-        ])
-        
-        return "\n".join(context_parts)
+【特徴】
+- フレンドリーで親しみやすい
+- 絵文字は使わない（日本語の自然な表現で）
+- 70-100文字程度
+- 謙虚だが親近感のある話し方
+- 「です・ます」調だが堅すぎない
 
-# AI API呼び出し関数（Layer 5専用バージョン追加）
-def call_gemini_api_layer5(prompt: str, api_key: str) -> Optional[str]:
-    """Gemini API呼び出し - Layer 5専用（80文字回答）"""
+質問: {query}
+
+大谷翔平として自然に返答:"""
+
+# AI API呼び出し（チャット用）
+def call_ai_for_chat(context: str, ai_provider: str, api_key: str) -> Optional[str]:
+    """チャット用AI呼び出し"""
     try:
-        import google.generativeai as genai
-        genai.configure(api_key=api_key)
-        
-        model = genai.GenerativeModel("gemini-1.5-flash")
-        response = model.generate_content(
-            prompt,
-            generation_config=genai.GenerationConfig(
-                max_output_tokens=150,  # 短い回答用
-                temperature=0.9,        # より創造性を高める
-                top_p=0.95,
-                top_k=50
+        if ai_provider == "Gemini":
+            import google.generativeai as genai
+            genai.configure(api_key=api_key)
+            
+            model = genai.GenerativeModel("gemini-1.5-flash")
+            response = model.generate_content(
+                context,
+                generation_config=genai.GenerationConfig(
+                    max_output_tokens=150,
+                    temperature=0.9,
+                    top_p=0.95
+                )
             )
-        )
-        
-        return response.text if hasattr(response, 'text') else None
+            return response.text if hasattr(response, 'text') else None
+            
+        elif ai_provider == "OpenAI":
+            headers = {'Authorization': f'Bearer {api_key}', 'Content-Type': 'application/json'}
+            data = {
+                'model': 'gpt-3.5-turbo',
+                'messages': [{'role': 'user', 'content': context}],
+                'max_tokens': 120,
+                'temperature': 0.9
+            }
+            
+            response = requests.post('https://api.openai.com/v1/chat/completions', 
+                                   headers=headers, json=data, timeout=30)
+            
+            if response.status_code == 200:
+                return response.json()['choices'][0]['message']['content']
+            else:
+                return f"API エラー: {response.status_code}"
+                
     except Exception as e:
-        return f"Gemini APIエラー: {str(e)}"
+        return f"AI 生成エラー: {str(e)}"
 
-def call_openai_api_layer5(prompt: str, api_key: str) -> Optional[str]:
-    """OpenAI API呼び出し - Layer 5専用（80文字回答）"""
-    try:
-        import requests
-        headers = {
-            'Authorization': f'Bearer {api_key}',
-            'Content-Type': 'application/json'
-        }
-        data = {
-            'model': 'gpt-3.5-turbo',
-            'messages': [{'role': 'user', 'content': prompt}],
-            'max_tokens': 120,
-            'temperature': 0.9,
-            'top_p': 0.95,
-            'frequency_penalty': 0.4,
-            'presence_penalty': 0.3
-        }
-        response = requests.post(
-            'https://api.openai.com/v1/chat/completions',
-            headers=headers,
-            json=data,
-            timeout=30
-        )
-        if response.status_code == 200:
-            return response.json()['choices'][0]['message']['content']
-        else:
-            return f"OpenAI APIエラー: {response.status_code}"
-    except Exception as e:
-        return f"OpenAI API接続エラー: {str(e)}"
+# チャット履歴管理
+def initialize_chat():
+    """チャット履歴の初期化"""
+    if 'chat_history' not in st.session_state:
+        st.session_state.chat_history = []
+        # 最初の挨拶メッセージ
+        st.session_state.chat_history.append({
+            'type': 'ohtani',
+            'message': 'こんにちは！大谷翔平です。何でも気軽に話しかけてくださいね！⚾',
+            'timestamp': datetime.now().strftime('%H:%M'),
+            'method': '初期メッセージ'
+        })
 
-# AI API呼び出し関数（改善版）
-def call_gemini_api(prompt: str, api_key: str) -> Optional[str]:
-    """Gemini API呼び出し - 改善版"""
-    try:
-        import google.generativeai as genai
-        genai.configure(api_key=api_key)
-        
-        model = genai.GenerativeModel("gemini-1.5-flash")
-        response = model.generate_content(
-            prompt,
-            generation_config=genai.GenerationConfig(
-                max_output_tokens=400,  # より長い回答を許可
-                temperature=0.8,        # より創造性を高める
-                top_p=0.9,
-                top_k=40
-            )
-        )
-        
-        return response.text if hasattr(response, 'text') else None
-    except Exception as e:
-        return f"Gemini APIエラー: {str(e)}"
+def add_message(message_type: str, message: str, method: str = ''):
+    """メッセージを履歴に追加"""
+    st.session_state.chat_history.append({
+        'type': message_type,
+        'message': message,
+        'timestamp': datetime.now().strftime('%H:%M'),
+        'method': method
+    })
 
-def call_openai_api(prompt: str, api_key: str) -> Optional[str]:
-    """OpenAI API呼び出し - 改善版"""
-    try:
-        headers = {
-            'Authorization': f'Bearer {api_key}',
-            'Content-Type': 'application/json'
-        }
+def display_chat_messages():
+    """チャット履歴を表示"""
+    chat_html = '<div class="chat-background">'
+    
+    for i, msg in enumerate(st.session_state.chat_history):
+        timestamp = msg["timestamp"]
         
-        data = {
-            'model': 'gpt-3.5-turbo',
-            'messages': [{'role': 'user', 'content': prompt}],
-            'max_tokens': 350,      # より長い回答を許可
-            'temperature': 0.8,     # より創造性を高める
-            'top_p': 0.9,
-            'frequency_penalty': 0.3,  # 繰り返しを減らす
-            'presence_penalty': 0.2
-        }
-        
-        response = requests.post(
-            'https://api.openai.com/v1/chat/completions',
-            headers=headers,
-            json=data,
-            timeout=30
-        )
-        
-        if response.status_code == 200:
-            return response.json()['choices'][0]['message']['content']
-        else:
-            return f"OpenAI APIエラー: {response.status_code}"
-    except Exception as e:
-        return f"OpenAI API接続エラー: {str(e)}"
+        if msg['type'] == 'user':
+            chat_html += f'''
+            <div class="user-message-container">
+                <div class="user-message">{msg["message"]}</div>
+                <div class="user-avatar">YOU</div>
+            </div>
+            <div class="timestamp">{timestamp}</div>
+            '''
+        elif msg['type'] == 'ohtani':
+            method_info = f' ({msg["method"]})' if msg.get("method") and msg["method"] != '初期メッセージ' else ''
+            chat_html += f'''
+            <div class="ohtani-message-container">
+                <div class="ohtani-avatar">🐶</div>
+                <div class="ohtani-message">{msg["message"]}</div>
+            </div>
+            <div class="timestamp">{timestamp}</div>
+            '''
+            if method_info and msg["method"] != '初期メッセージ':
+                chat_html += f'<div class="system-message">{msg["method"]}</div>'
+        elif msg['type'] == 'system':
+            chat_html += f'<div class="system-message">{msg["message"]}</div>'
+        elif msg['type'] == 'typing':
+            chat_html += f'''
+            <div class="typing-container">
+                <div class="ohtani-avatar">🐶</div>
+                <div class="typing-indicator">
+                    大谷選手が入力中
+                    <div class="typing-dots">
+                        <div class="typing-dot"></div>
+                        <div class="typing-dot"></div>
+                        <div class="typing-dot"></div>
+                    </div>
+                </div>
+            </div>
+            '''
+    
+    chat_html += '</div>'
+    return chat_html
+
+def show_quick_replies():
+    """クイック返信ボタン"""
+    st.markdown('''
+    <div class="quick-replies">
+    ''', unsafe_allow_html=True)
+    
+    quick_questions = [
+        "今日調子はどう？", "野球の話聞かせて", "好きな食べ物は？", 
+        "今何してるの？", "応援してるよ！", "アドバイスください"
+    ]
+    
+    # ボタンを横並びで表示
+    cols = st.columns(len(quick_questions))
+    selected_question = None
+    
+    for i, question in enumerate(quick_questions):
+        with cols[i]:
+            if st.button(question, key=f"quick_{i}", help=f"クイック送信: {question}"):
+                selected_question = question
+    
+    st.markdown('</div>', unsafe_allow_html=True)
+    return selected_question
 
 # メイン関数
 def main():
-    st.title("AI大谷 - 改善版")
-    st.subheader("🚀 多様性向上RAG + 生成AI ハイブリッドシステム")
+    # CSS読み込み
+    load_css()
     
-    # 改善点の説明
-    with st.expander("🔧 この版の改善点"):
-        st.markdown("""
-        **主な改善点：**
-        1. **サンプルデータを20件→100件以上に拡張**
-        2. **検索閾値を0.3→0.15に下げて、より多くのRAG検索を成功**
-        3. **トピック別回答テンプレートを追加（野球、食べ物、趣味など）**
-        4. **話し方パターンを大幅拡張（謙虚表現、価値観など）**
-        5. **AI API設定を最適化（temperature上昇、頻度ペナルティ追加）**
-        6. **複数文書統合ロジックの改善**
-        """)
+    # ページナビゲーション
+    current_page = show_page_navigation()
     
-    # サイドバー設定
+    # 現在のページに応じてコンテンツ表示
+    if current_page == 'home':
+        show_home_page()
+    elif current_page == 'chat':
+        show_chat_page()
+    elif current_page == 'extraction':
+        show_extraction_page()
+    elif current_page == 'settings':
+        show_settings_page()
+
+def show_chat_page():
+    # CSS読み込み
+    load_css()
+    
+    # チャット履歴初期化
+    initialize_chat()
+    
+    # ヘッダー
+    st.markdown('''
+    <div class="chat-app">
+        <div class="chat-header">
+            AI大谷とチャット
+            <div class="status-indicator">
+                <div class="online-dot"></div>
+                オンライン
+            </div>
+        </div>
+    </div>
+    ''', unsafe_allow_html=True)
+    
+    # サイドバー（設定）
     with st.sidebar:
-        st.header("⚙️ 設定")
+        st.header("⚙️ チャット設定")
         
-        # 検索設定
-        search_method = st.selectbox(
-            "検索方法",
-            options=['hybrid', 'tfidf', 'keyword'],
-            index=0,
-            help="hybrid: 複数手法組み合わせ（推奨）"
-        )
-        
-        # 改善された閾値設定
-        threshold = st.slider(
-            "検索閾値", 
-            0.05, 0.5, 0.15, 0.02,
-            help="低い値ほどより多くの文書がマッチ（推奨: 0.15）"
-        )
-        
-        st.divider()
-        
-        # AI API設定
-        st.subheader("🤖 生成AI設定")
-        ai_provider = st.selectbox("AIプロバイダー", ["なし", "Gemini", "OpenAI"])
-        
+        # AI設定
+        ai_provider = st.selectbox("🤖 AI生成", ["なし", "Gemini", "OpenAI"])
         api_key = ""
+        
         if ai_provider == "Gemini":
-            api_key = st.text_input(
-                "Gemini API Key",
-                type="password",
-                value=os.getenv("GEMINI_API_KEY", ""),
-                help="Gemini APIキーを入力してください"
-            )
+            api_key = st.text_input("Gemini API Key", type="password", 
+                                  value=os.getenv("GEMINI_API_KEY", ""))
         elif ai_provider == "OpenAI":
-            api_key = st.text_input(
-                "OpenAI API Key", 
-                type="password",
-                value=os.getenv("OPENAI_API_KEY", ""),
-                help="OpenAI APIキーを入力してください"
-            )
+            api_key = st.text_input("OpenAI API Key", type="password",
+                                  value=os.getenv("OPENAI_API_KEY", ""))
         
         use_ai = ai_provider != "なし" and bool(api_key)
         
         if use_ai:
-            st.success(f"✅ {ai_provider} API 有効")
+            st.success(f"✅ {ai_provider} 接続中")
         else:
-            st.info("💡 APIキー未設定: 改善されたパターン生成を使用")
+            st.info("💬 パターン応答モード")
+        
+        st.divider()
+        
+        # チャット操作
+        if st.button("🗑️ チャット履歴をクリア"):
+            st.session_state.chat_history = []
+            initialize_chat()
+            st.rerun()
+        
+        if st.button("🔄 ページ更新"):
+            st.rerun()
+        
+        st.divider()
+        
+        # 統計情報
+        total_messages = len(st.session_state.chat_history)
+        user_messages = len([m for m in st.session_state.chat_history if m['type'] == 'user'])
+        ohtani_messages = len([m for m in st.session_state.chat_history if m['type'] == 'ohtani'])
+        
+        st.metric("💬 総メッセージ数", total_messages)
+        st.metric("👤 あなたの発言", user_messages)
+        st.metric("🐶 大谷選手の返答", ohtani_messages)
+        
+        # 今日の大谷情報（楽しい要素）
+        with st.expander("📊 今日の大谷選手"):
+            st.write("⚾ 練習: バッティング練習完了")
+            st.write("🏃 トレーニング: ランニング 5km")
+            st.write("📚 勉強: 英語学習 30分")
+            st.write("🐶 デコピン: お散歩済み")
+            st.write("😊 今日の気分: 絶好調！")
+            
+        with st.expander("💡 使い方のコツ"):
+            st.markdown("""
+            **自然に話しかけてみて！**
+            
+            🗣️ **こんな話題がおすすめ:**
+            - 今日の調子や気分
+            - 野球のこと
+            - 好きな食べ物や趣味  
+            - 応援メッセージ
+            - 相談や質問
+            
+            🤖 **AIモード (APIキー設定時):**
+            - より自然で多様な会話
+            - 新しい質問にも対応
+            - 大谷選手らしい返答
+            
+            💬 **パターンモード:**
+            - 基本的な会話に対応
+            - 安定した返答
+            - APIキー不要
+            """)
     
     # RAGシステム初期化
     @st.cache_resource
-    def load_rag_system():
-        return ImprovedOhtaniRAG('ohtani_rag_final.csv')
+    def load_chat_rag():
+        return OhtaniChatRAG('ohtani_rag_final.csv')
     
-    with st.spinner("🚀 改善システム初期化中..."):
-        rag = load_rag_system()
+    rag = load_chat_rag()
     
-    st.success(f"✅ 初期化完了！ ({len(rag.df)}件のデータを読み込み)")
+    # メインチャット画面
+    with st.container():
+        # チャット履歴表示
+        st.markdown(display_chat_messages(), unsafe_allow_html=True)
     
-    # メイン画面
-    st.markdown("---")
+    # クイック返信
+    quick_reply = show_quick_replies()
+    if quick_reply:
+        st.session_state.user_input = quick_reply
+        st.rerun()
     
-    # 質問入力
-    query = st.text_input(
-        "💬 大谷選手に質問してください:",
-        placeholder="例: 今日のトレーニングはどうでしたか？",
-        help="どんな質問でも大谷選手風に回答します（回答の多様性が向上）"
-    )
+    # 入力エリア
+    st.markdown('<div class="input-area">', unsafe_allow_html=True)
     
-    # 操作ボタン
-    col1, col2, col3, col4 = st.columns([1, 1, 1, 1])
+    # メッセージ入力
+    col1, col2 = st.columns([4, 1])
     
     with col1:
-        search_btn = st.button("🔍 質問する", type="primary")
+        user_input = st.text_input(
+            "メッセージを入力...", 
+            key="message_input",
+            placeholder="大谷選手に話しかけてみよう！",
+            label_visibility="collapsed"
+        )
+    
     with col2:
-        random_btn = st.button("🎲 ランダム")
-    with col3:
-        if st.button("🔄 リセット"):
-            st.rerun()
-    with col4:
-        show_stats = st.button("📊 統計")
+        send_button = st.button("送信", type="primary", use_container_width=True)
     
-    # ランダム質問（拡張版）
-    if random_btn:
-        sample_queries = [
-            "今日の調子はいかがですか？",
-            "最近読んだ本について教えてください",
-            "チームの雰囲気はどうですか？",
-            "好きなアニメはありますか？",
-            "日本の家族と連絡は取っていますか？",
-            "アメリカの生活で驚いたことは？",
-            "子供の頃の夢は何でしたか？",
-            "尊敬している人について教えてください",
-            "ストレス発散方法は？",
-            "将来日本でプレーしたいですか？",
-            "好きな季節はいつですか？",
-            "料理で得意なものはありますか？"
-        ]
-        query = random.choice(sample_queries)
-        search_btn = True
+    st.markdown('</div>', unsafe_allow_html=True)
     
-    # 検索実行
-    if search_btn and query.strip():
-        with st.spinner("🤖 検索・生成中..."):
-            start_time = time.time()
-            
-            # RAG検索
-            result = rag.search(query, method=search_method, threshold=threshold, ai_provider=ai_provider, api_key=api_key)
-            search_time = time.time() - start_time
-            
-            # AI生成処理の分岐
-            ai_response = None
-            ai_time = 0
-            
-            if result.get('needs_ai') and use_ai:
-                # Layer 5: 新規質問のAI生成
-                ai_start = time.time()
-                if ai_provider == "Gemini":
-                    ai_response = call_gemini_api_layer5(result['ai_context'], api_key)
-                elif ai_provider == "OpenAI":
-                    ai_response = call_openai_api_layer5(result['ai_context'], api_key)
-                
-                ai_time = time.time() - ai_start
-                
-                if ai_response and not ai_response.startswith("API"):
-                    result['response'] = ai_response.strip()
-                    result['method'] = f"{ai_provider} AI生成（新規質問）"
-                    result['confidence'] = 'medium'
-                    st.success(f"✅ Layer 5 AI生成成功: 新しい質問に対してAIが回答生成 ({ai_time:.2f}秒)")
-            else:
-                # AI生成失敗時のフォールバック
-                result['response'] = rag._generate_improved_pattern_response(query)
-                result['method'] = '改善パターン生成（AI失敗）'
-                st.warning("⚠️ AI生成失敗、パターン生成にフォールバック")
-
-            # Layer 1-4: RAG情報ありのAI強化（別分岐）
-            if result.get('search_results') and use_ai and result['layer'] <= 4:
-                ai_start = time.time()
-                context = rag.prepare_ai_context(query, result['search_results'])
-                
-                if ai_provider == "Gemini":
-                    ai_response = call_gemini_api(context, api_key)
-                elif ai_provider == "OpenAI":
-                    ai_response = call_openai_api(context, api_key)
-                
-                ai_time = time.time() - ai_start
-                
-                if ai_response and not ai_response.startswith("API"):
-                    st.info(f"✅ RAG+AI強化: {len(result.get('retrieved_docs', []))}件の文書から生成 ({ai_time:.2f}秒)")
-            
-            # 結果表示
-            st.markdown("---")
-            
-            # パフォーマンス情報
-            col1, col2, col3, col4 = st.columns(4)
-            with col1:
-                layer_colors = {1: '🟢', 2: '🟡', 3: '🟠', 4: '🔵', 5: '🟣'}
-                st.metric("レイヤー", f"{layer_colors.get(result['layer'], '⚪')} Layer {result['layer']}")
-            with col2:
-                confidence_colors = {'high': '🟢', 'medium': '🟡', 'low': '🔵'}
-                st.metric("信頼度", f"{confidence_colors[result['confidence']]} {result['confidence']}")
-            with col3:
-                st.metric("スコア", f"{result['score']:.3f}")
-            with col4:
-                if ai_time > 0:
-                    st.metric("AI生成時間", f"{ai_time:.2f}秒")
-                else:
-                    st.metric("検索時間", f"{search_time:.2f}秒")
-            
-            # 回答表示の改善
-            if result['layer'] == 5 and result.get('needs_ai') and result['response']:
-                # Layer 5でのAI生成成功
-                st.markdown("### 🤖 AI大谷（新規質問）")
-                st.markdown(f"> {result['response']}")
-                
-                st.success(f"🎯 新しい質問に対してAIが大谷選手風に回答生成")
-                
-            elif ai_response and not ai_response.startswith("API") and result['layer'] <= 4:
-                # Layer 1-4でのRAG+AI強化
-                st.markdown("### 🤖 RAG + AI生成回答")
-                st.markdown(f"> {ai_response}")
-                
-                st.success(f"🔍 RAG検索成功: {len(result.get('retrieved_docs', []))}件の関連文書を活用")
-                
-                with st.expander("🔍 RAG検索詳細"):
-                    st.markdown(f"**検索方法:** {result['method']}")
-                    st.markdown(f"**元の回答:** {result['response']}")
-                    st.markdown(f"**出典:** {result['source']}")
-                    
-                    if result.get('retrieved_docs'):
-                        st.markdown("**検索された関連文書:**")
-                        for i, doc in enumerate(result['retrieved_docs'][:4], 1):
-                            st.markdown(f"{i}. スコア: {doc['score']:.3f} | ID: {doc['id']}")
-                            st.markdown(f"   Q: {doc['question']}")
-                            st.markdown(f"   A: {doc['answer'][:100]}...")
-            else:
-                # 通常のRAG回答またはパターン生成
-                st.markdown("### 💬 AI大谷")
-                st.markdown(f"> {result['response']}")
-                
-                if result['layer'] <= 4:
-                    st.info(f"🔍 RAG検索: {result['method']}で関連文書を発見")
-                elif result['layer'] == 5:
-                    if use_ai:
-                        st.warning("⚠️ 新規質問でしたが、AI生成に失敗しました")
-                    else:
-                        st.info("💡 新しい質問です。より自然な回答にはAPIキーを設定してください")
-                
-                if ai_response and ai_response.startswith("API"):
-                    st.error(f"🚫 AI生成失敗: {ai_response}")
-            
-            # レイヤー別の説明（更新）
-            layer_explanations = {
-                1: "🟢 TF-IDFによる高精度マッチング",
-                2: "🟡 キーワードによる中精度マッチング", 
-                3: "🟠 回答空間からの関連検索",
-                4: "🔵 複数文書統合による生成",
-                5: "🟣 AI生成（新規質問）" if use_ai else "🟣 パターン生成（新規質問）"
-            }
-            
-            st.info(f"使用したレイヤー: {layer_explanations.get(result['layer'], 'その他')}")
-            
-            # Layer 5の特別説明
-            if result['layer'] == 5:
-                if use_ai and result.get('needs_ai'):
-                    st.info("🚀 **Layer 5**: RAG検索で関連文書が見つからなかった新しい質問に対して、AIが大谷選手風の回答を生成しました！")
-                elif use_ai:
-                    st.info("🤖 **Layer 5**: AI生成が利用可能でしたが、パターン生成で十分な回答ができました")
-                else:
-                    st.info("💡 **Layer 5**: 新しい質問です。AIキーを設定すると、より自然で多様な回答が可能になります")
-            
-            # 詳細情報
-            with st.expander("📝 詳細情報"):
-                detailed_info = {
-                    "検索レイヤー": result['layer'],
-                    "検索方法": result['method'], 
-                    "信頼度": result['confidence'],
-                    "スコア": result['score'],
-                    "出典": result['source'],
-                    "検索時間": f"{search_time:.3f}秒",
-                    "AI生成時間": f"{ai_time:.3f}秒" if ai_time > 0 else "未使用",
-                    "検索された文書数": len(result.get('retrieved_docs', [])),
-                    "検出されたトピック": rag._detect_topic(query),
-                    "AI生成が必要": result.get('needs_ai', False),
-                    "回答文字数": len(result['response']) if result['response'] else 0
-                }
-                st.json(detailed_info)
-    
-    # 統計情報表示
-    if show_stats:
-        st.markdown("---")
-        st.markdown("### 📊 システム統計")
+    # メッセージ送信処理
+    if (send_button and user_input.strip()) or hasattr(st.session_state, 'user_input'):
         
-        col1, col2 = st.columns(2)
-        with col1:
-            st.metric("総データ数", len(rag.df))
-            st.metric("語彙サイズ", len(rag.tfidf_search.vocab))
-            st.metric("トピックテンプレート数", len(rag.topic_templates))
-        with col2:
-            st.metric("キーワード数", len(rag.keyword_search.keyword_index))
-            st.metric("話し方パターン数", len(rag.ohtani_patterns['starters']) + len(rag.ohtani_patterns['endings']))
-            st.metric("バージョン", "Layer5-AI強化版 v3.0")
+        if hasattr(st.session_state, 'user_input'):
+            user_input = st.session_state.user_input
+            delattr(st.session_state, 'user_input')
+        
+        # ユーザーメッセージを追加
+        add_message('user', user_input)
+        
+        # タイピング表示
+        typing_placeholder = st.empty()
+        with typing_placeholder:
+            typing_html = display_chat_messages() + '''
+            <div class="typing-container">
+                <div class="ohtani-avatar">🐶</div>
+                <div class="typing-indicator">
+                    大谷選手が入力中
+                    <div class="typing-dots">
+                        <div class="typing-dot"></div>
+                        <div class="typing-dot"></div>
+                        <div class="typing-dot"></div>
+                    </div>
+                </div>
+            </div>
+            '''
+            st.markdown(typing_html, unsafe_allow_html=True)
+        
+        # 少し待機（リアル感演出）
+        time.sleep(random.uniform(1.0, 2.0))
+        
+        # RAG検索・AI生成
+        try:
+            result = rag.chat_search(user_input, ai_provider if use_ai else None, api_key if use_ai else None)
+            
+            ohtani_response = result['response']
+            method = result['method']
+            
+            # AI生成が必要な場合
+            if result.get('needs_ai') and use_ai:
+                ai_response = call_ai_for_chat(result['ai_context'], ai_provider, api_key)
+                if ai_response and not ai_response.startswith(('API', 'AI')):
+                    ohtani_response = ai_response.strip()
+                    method = f"{ai_provider} AI生成"
+            
+            # 大谷選手の返答を追加
+            add_message('ohtani', ohtani_response, method)
+            
+        except Exception as e:
+            # エラー時の対応
+            add_message('ohtani', 'すみません、ちょっと考えがまとまらなくて...😅 もう一度話しかけてもらえますか？', 'エラー対応')
+        
+        # タイピング表示を削除して再描画
+        typing_placeholder.empty()
+        st.rerun()
     
-    # 改善されたサンプル質問セクション
+    # フッター情報（シンプル化）
     st.markdown("---")
-    st.markdown("### 💡 カテゴリ別サンプル質問")
     
-    improved_sample_categories = {
-        "⚾ 野球・競技": [
-            "今シーズンの手応えはいかがですか？",
-            "バッティングフォームで最近変えたことは？",
-            "チームメイトとの連携で意識していることは？",
-            "プレッシャーのかかる場面での心構えは？"
-        ],
-        "🍱 食事・健康": [
-            "体調管理で気をつけていることは？", 
-            "アメリカで好きになった食べ物は？",
-            "日本食が恋しくなることはありますか？",
-            "栄養面で意識していることは？"
-        ],
-        "🎯 プライベート・趣味": [
-            "最近ハマっていることはありますか？",
-            "休日のリラックス方法は？",
-            "好きな音楽や映画はありますか？",
-            "新しく挑戦してみたいことは？"
-        ],
-        "👥 人間関係・コミュニケーション": [
-            "ファンとの交流で印象的だったことは？",
-            "コーチとのコミュニケーションで大切にしていることは？",
-            "日本の家族や友人とは連絡を取り合っていますか？",
-            "言葉の壁を感じることはありますか？"
-        ],
-        "🌟 将来・夢・価値観": [
-            "10年後の自分はどうなっていたいですか？",
-            "野球を通じて伝えたいことは？",
-            "人生で一番大切にしている価値観は？",
-            "次世代の選手たちにアドバイスはありますか？"
-        ]
-    }
+    col1, col2, col3 = st.columns([1, 2, 1])
     
-    for category, questions in improved_sample_categories.items():
-        with st.expander(category):
-            for i, q in enumerate(questions):
-                if st.button(q, key=f"{category}_{i}"):
-                    result = rag.search(q, method=search_method, threshold=threshold)
-                    st.write(f"**質問:** {q}")
-                    st.write(f"**回答:** {result['response']}")
-                    st.write(f"**レイヤー:** {result['layer']} | **スコア:** {result['score']:.3f}")
+    with col1:
+        chat_count = len([m for m in st.session_state.chat_history if m['type'] == 'user'])
+        st.metric("会話数", f"{chat_count}回")
+    
+    with col2:
+        st.markdown("#### 🐶 AI大谷とチャット中")
+        if use_ai:
+            st.success("🤖 AI強化モード")
+        else:
+            st.info("💬 基本モード")
+    
+    with col3:
+        st.metric("メッセージ", len(st.session_state.chat_history))
 
 if __name__ == "__main__":
     main()
