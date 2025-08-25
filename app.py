@@ -67,13 +67,13 @@ def load_css():
     
     /* ヘッダー */
     .chat-header {
-        background: linear-gradient(135deg, #007AFF, #5856D6);
-        color: white;
-        padding: 15px 20px;
+        background: #e9ecef; /* グレー */
+        color: #333;
+        padding: 12px 16px;
         text-align: center;
         font-weight: bold;
-        font-size: 20px;
-        box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        font-size: 18px;
+        box-shadow: 0 2px 10px rgba(0,0,0,0.08);
         position: relative;
     }
     
@@ -296,13 +296,13 @@ def load_css():
     
     /* 入力エリア */
     .input-area {
-        background: white;
-        padding: 15px 20px;
+        background: transparent; /* 白い帯をなくす */
+        padding: 8px 8px;
         display: flex;
         align-items: center;
         gap: 10px;
-        box-shadow: 0 -2px 10px rgba(0,0,0,0.1);
-        border-top: 1px solid #e9ecef;
+        box-shadow: none;
+        border-top: none;
         position: sticky;
         bottom: 0;
         z-index: 5;
@@ -311,8 +311,8 @@ def load_css():
     /* Streamlitの入力フィールドスタイル調整 */
     .stTextInput > div > div > input {
         border-radius: 25px !important;
-        border: 1px solid #ddd !important;
-        padding: 12px 20px !important;
+        border: 1px solid #666 !important;
+        padding: 12px 16px !important;
         font-size: 16px !important;
     }
     
@@ -323,19 +323,19 @@ def load_css():
     
     /* ボタンスタイル */
     .stButton > button {
-        background: #06c755 !important;
+        background: #22c55e !important;
         color: white !important;
         border: none !important;
         border-radius: 20px !important;
-        padding: 8px 20px !important;
+        padding: 10px 20px !important;
         font-weight: 500 !important;
         transition: all 0.3s ease !important;
     }
     
     .stButton > button:hover {
-        background: #05b04d !important;
+        background: #16a34a !important;
         transform: translateY(-1px) !important;
-        box-shadow: 0 4px 12px rgba(6, 199, 85, 0.3) !important;
+        box-shadow: 0 4px 12px rgba(34, 197, 94, 0.3) !important;
     }
     
     /* サイドバー非表示 */
@@ -1034,11 +1034,12 @@ def show_chat_page():
     
     rag = load_chat_rag()
     
-    # メインチャット画面（ヘッダーと履歴を同コンテナで描画）
-    with st.container():
-        chat_body = display_chat_messages()
-        combined_html = f'<div class="chat-app">{header_html}{chat_body}</div>'
-        st.markdown(combined_html, unsafe_allow_html=True)
+    # メインチャット画面（プレースホルダで常に置換描画）
+    chat_container = st.empty()
+    def render_chat(body_html: str):
+        chat_container.markdown(f'<div class="chat-app">{header_html}{body_html}</div>', unsafe_allow_html=True)
+
+    render_chat(display_chat_messages())
     
     # クイック返信
     quick_reply = show_quick_replies()
@@ -1075,27 +1076,24 @@ def show_chat_page():
         # ユーザーメッセージを追加
         add_message('user', user_input)
         
-        # タイピング表示
-        typing_placeholder = st.empty()
-        with typing_placeholder:
-            typing_inner = textwrap.dedent('''
-            <div class="typing-container">
-                <div class="ohtani-avatar">🐶</div>
-                <div class="typing-indicator">
-                    大谷選手が入力中
-                    <div class="typing-dots">
-                        <div class="typing-dot"></div>
-                        <div class="typing-dot"></div>
-                        <div class="typing-dot"></div>
-                    </div>
+        # タイピング表示（同じプレースホルダを更新）
+        typing_inner = textwrap.dedent('''
+        <div class="typing-container">
+            <div class="ohtani-avatar">🐶</div>
+            <div class="typing-indicator">
+                大谷選手が入力中
+                <div class="typing-dots">
+                    <div class="typing-dot"></div>
+                    <div class="typing-dot"></div>
+                    <div class="typing-dot"></div>
                 </div>
             </div>
-            ''')
-            body_html = display_chat_messages()
-            if body_html.strip().endswith('</div>'):
-                body_html = body_html[:-6] + typing_inner + '</div>'
-            typing_full = f'<div class="chat-app">{header_html}{body_html}</div>'
-            st.markdown(typing_full, unsafe_allow_html=True)
+        </div>
+        ''')
+        body_html = display_chat_messages()
+        if body_html.strip().endswith('</div>'):
+            body_html = body_html[:-6] + typing_inner + '</div>'
+        render_chat(body_html)
         
         # 少し待機（リアル感演出）
         time.sleep(random.uniform(1.0, 2.0))
@@ -1126,7 +1124,7 @@ def show_chat_page():
             add_message('ohtani', 'すみません、ちょっと考えがまとまらなくて...😅 もう一度話しかけてもらえますか？', 'エラー対応')
         
         # タイピング表示を削除して再描画
-        typing_placeholder.empty()
+        render_chat(display_chat_messages())
         st.rerun()
     
     # フッター情報（シンプル化）
