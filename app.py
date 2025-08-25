@@ -55,7 +55,8 @@ def load_css():
     .chat-app {
         display: flex;
         flex-direction: column;
-        height: 80vh;
+        height: auto;
+        min-height: 50vh;
         max-width: 800px;
         margin: 0 auto;
         background: white;
@@ -121,7 +122,6 @@ def load_css():
         display: flex;
         flex-direction: column;
         gap: 10px;
-        max-height: 50vh;
     }
     
     /* ユーザーメッセージ（右側・LINE緑） */
@@ -303,6 +303,9 @@ def load_css():
         gap: 10px;
         box-shadow: 0 -2px 10px rgba(0,0,0,0.1);
         border-top: 1px solid #e9ecef;
+        position: sticky;
+        bottom: 0;
+        z-index: 5;
     }
     
     /* Streamlitの入力フィールドスタイル調整 */
@@ -344,7 +347,8 @@ def load_css():
     @media (max-width: 768px) {
         .chat-app {
             max-width: 100%;
-            height: 85vh;
+            height: auto;
+            min-height: 60vh;
             border-radius: 0;
         }
         
@@ -353,7 +357,6 @@ def load_css():
         }
         
         .chat-background {
-            max-height: 60vh;
         }
     }
     </style>
@@ -750,14 +753,32 @@ class OhtaniChatRAG:
     def _prepare_chat_ai_context(self, query: str) -> str:
         """チャット用AI生成コンテキスト"""
         return f"""
-あなたは大谷翔平選手として、友達とチャットするような親しみやすい口調で回答してください。
+あなたは大谷翔平選手として、記者に対応するときと同じような感じで回答してください。
 
 【特徴】
-- フレンドリーで親しみやすい
 - 絵文字は使わない（日本語の自然な表現で）
 - 70-100文字程度
-- 謙虚だが親近感のある話し方
-- 「です・ます」調だが堅すぎない
+- 以下のような大谷翔平選手らしい口調で回答してください。
+  特に一番最後の4が大切です。
+    1. 謙虚さと誠実さ
+        「まあ、そうですね」から始めることが多い
+        「〜かなと思います」「〜だったんじゃないかなと思います」
+        「特別なことではないですが」「あまり意識していないんですが」
+        「個人的には」「僕の中では」
+        「運も良かったと思います」「ラッキーだったと思います」
+    2. 論理的で分かりやすい説明
+        「〜という観点で」「〜に比べると」「〜というよりも」
+        「〜という部分では」「〜という風に」「〜という感じです」
+        「基本的に」「結果的に」「そのために」「〜だと思っているので」
+    3. ポジティブで前向きな姿勢
+        「それはもう、やるしかないです」
+        「すごく〜だと思います」「もっと〜していきたいです」
+        「自分のやるべきことは変わらないので」
+        「そこは、もう切り替えて」「次の機会に」
+        「チームが勝つことが一番なので」「できることは全部やる」「もちろん」
+    4. 特徴的な文末パターン
+        「〜という感じです」「〜かなと思います」
+        「〜んじゃないかなと思います」
 
 質問: {query}
 
@@ -1015,7 +1036,8 @@ def show_chat_page():
     
     # メインチャット画面（ヘッダーと履歴を同コンテナで描画）
     with st.container():
-        combined_html = f'<div class="chat-app">{header_html}{display_chat_messages()}</div>'
+        chat_body = display_chat_messages()
+        combined_html = f'<div class="chat-app">{header_html}{chat_body}</div>'
         st.markdown(combined_html, unsafe_allow_html=True)
     
     # クイック返信
