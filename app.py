@@ -49,6 +49,7 @@ def load_css():
         padding-top: 1rem !important;
         padding-left: 1rem !important;
         padding-right: 1rem !important;
+        padding-bottom: 0 !important; /* 余白削除 */
     }
     
     /* チャット画面全体 */
@@ -209,7 +210,7 @@ def load_css():
         padding: 4px 8px;
         border-radius: 8px;
         text-align: center;
-        margin: 5px auto;
+        margin: 5px auto 0 auto; /* 下マージンをなくす */
         max-width: 200px;
         font-size: 10px;
         border: 1px solid rgba(0,0,0,0.05);
@@ -305,6 +306,7 @@ def load_css():
         position: sticky;
         bottom: 0;
         z-index: 5;
+        margin-bottom: 0 !important; /* 余白なくす */
     }
     
     /* Streamlitの入力フィールドスタイル調整 */
@@ -638,28 +640,28 @@ class OhtaniChatRAG:
             return self._handle_short_response(query)
         
         # 通常のRAG検索
-        threshold = 0.1  # チャット用により低い閾値
+        threshold = 0.05  # より低い閾値でRAGを優先
         
         # TF-IDF検索
-        tfidf_results = self.tfidf_search.search(query, top_k=3)
+        tfidf_results = self.tfidf_search.search(query, top_k=5)
         if tfidf_results and tfidf_results[0][1] >= threshold:
             idx, score = tfidf_results[0]
             return {
                 'method': 'RAG検索',
                 'response': self._make_chat_friendly(self.answers[idx]),
-                'confidence': 'high' if score > 0.3 else 'medium',
-                'needs_ai': bool(ai_provider and api_key and score < 0.2)
+                'confidence': 'high' if score > 0.2 else 'medium',
+                'needs_ai': False  # RAGがあればAI生成はしない
             }
         
         # キーワード検索
-        keyword_results = self.keyword_search.search(query, top_k=3)
+        keyword_results = self.keyword_search.search(query, top_k=5)
         if keyword_results and keyword_results[0][1] >= threshold:
             idx, score = keyword_results[0]
             return {
                 'method': 'キーワード検索',
                 'response': self._make_chat_friendly(self.answers[idx]),
                 'confidence': 'medium',
-                'needs_ai': bool(ai_provider and api_key)
+                'needs_ai': False  # RAGがあればAI生成はしない
             }
         
         # AI生成が必要
