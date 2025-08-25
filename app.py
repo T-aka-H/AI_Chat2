@@ -33,7 +33,7 @@ def show_settings_page():
 
 # 設定
 st.set_page_config(
-    page_title="💬 大谷翔平チャット",
+    page_title="💬 AI竹野浩樹チャット",
     page_icon="⚾",
     layout="wide",
     initial_sidebar_state="collapsed"
@@ -1222,7 +1222,7 @@ def show_chat_page():
     # ヘッダーHTML
     header_html = textwrap.dedent('''
         <div class="chat-header">
-            AI大谷とチャット
+            AI竹野浩樹とチャット
             <div class="status-indicator">
                 <div class="online-dot"></div>
                 オンライン
@@ -1418,7 +1418,7 @@ def show_chat_page():
         st.metric("会話数", f"{chat_count}回")
     
     with col2:
-        st.markdown("#### 🐶 AI大谷とチャット中")
+        st.markdown("#### 🐶 AI竹野浩樹とチャット中")
         if use_ai:
             st.success("🤖 AI強化モード")
         else:
