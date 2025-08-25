@@ -182,6 +182,14 @@ def load_css():
         flex-shrink: 0;
         border: 2px solid #90CAF9;
         box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        overflow: hidden;
+    }
+    
+    .ohtani-avatar img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        object-position: center;
     }
     
     .ohtani-message {
@@ -1145,7 +1153,7 @@ def display_chat_messages():
             chat_html += f'<div class="timestamp">{timestamp}</div>'
         elif msg['type'] == 'ohtani':
             chat_html += '<div class="ohtani-message-container">'
-            chat_html += '<div class="ohtani-avatar">🐶</div>'
+            chat_html += '<div class="ohtani-avatar"><img src="icon.png" alt="竹野アイコン"></div>'
             chat_html += f'<div class="ohtani-message">{safe_message}</div>'
             chat_html += '</div>'
             # 検索方法を時間の前に表示
@@ -1157,7 +1165,7 @@ def display_chat_messages():
         elif msg['type'] == 'typing':
             chat_html += f'''
             <div class="typing-container">
-                <div class="ohtani-avatar">🐶</div>
+                <div class="ohtani-avatar"><img src="icon.png" alt="竹野アイコン"></div>
                 <div class="typing-indicator">
                     竹野さんが入力中
                     <div class="typing-dots">
@@ -1262,7 +1270,7 @@ def show_chat_page():
         
         st.metric("💬 総メッセージ数", total_messages)
         st.metric("👤 あなたの発言", user_messages)
-        st.metric("🐶 竹野さんの返答", ohtani_messages)
+        st.metric("💬 竹野さんの返答", ohtani_messages)
         
 
             
@@ -1355,7 +1363,7 @@ def show_chat_page():
         # タイピング表示（同じプレースホルダを更新）
         typing_inner = textwrap.dedent('''
             <div class="typing-container">
-                <div class="ohtani-avatar">🐶</div>
+                <div class="ohtani-avatar"><img src="icon.png" alt="竹野アイコン"></div>
                 <div class="typing-indicator">
                     竹野さんが入力中
                     <div class="typing-dots">
@@ -1413,7 +1421,7 @@ def show_chat_page():
         st.metric("会話数", f"{chat_count}回")
     
     with col2:
-        st.markdown("#### 🐶 AI竹野浩樹とチャット中")
+        st.markdown("#### 💬 AI竹野浩樹とチャット中")
         if use_ai:
             st.success("🤖 AI強化モード")
         else:
