@@ -1117,7 +1117,7 @@ def initialize_chat():
         # 最初の挨拶メッセージ
         st.session_state.chat_history.append({
             'type': 'ohtani',
-            'message': 'AI竹野です（今回はデモなので中身はAI大谷翔平です）。チャットしなかったらしなかったで、みなさんうるさいですし、聞きたいことがあれば聞きます。',
+            'message': 'AI竹野です（デモ中なので中身はAI大谷翔平）。気軽に私に聞きたいこと、聞いてね。',
             'timestamp': datetime.now(pytz.timezone('Asia/Tokyo')).strftime('%H時%M分'),
             'method': '初期メッセージ'
         })
@@ -1231,7 +1231,7 @@ def show_chat_page():
     # ヘッダーHTML
     header_html = textwrap.dedent('''
         <div class="chat-header">
-            AI竹野浩樹とチャット
+            AI竹野浩樹
             <div class="status-indicator">
                 <div class="online-dot"></div>
                 オンライン
