@@ -947,7 +947,7 @@ def initialize_chat():
         st.session_state.chat_history.append({
             'type': 'ohtani',
             'message': 'AI大谷です。チャットしなかったらしなかったで、みなさんうるさいですし、聞きたいことがあれば聞きます。',
-            'timestamp': datetime.now().strftime('%H:%M'),
+            'timestamp': datetime.now().strftime('%H時%M分'),
             'method': '初期メッセージ'
         })
 
@@ -956,7 +956,7 @@ def add_message(message_type: str, message: str, method: str = ''):
     st.session_state.chat_history.append({
         'type': message_type,
         'message': message,
-        'timestamp': datetime.now().strftime('%H:%M'),
+        'timestamp': datetime.now().strftime('%H時%M分'),
         'method': method
     })
 
