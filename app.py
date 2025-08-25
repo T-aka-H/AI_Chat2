@@ -869,14 +869,14 @@ def display_chat_messages():
             chat_html += '</div>'
             chat_html += f'<div class="timestamp">{timestamp}</div>'
         elif msg['type'] == 'ohtani':
-            method_info = f' ({msg.get("method")})' if msg.get("method") and msg.get("method") != '初期メッセージ' else ''
             chat_html += '<div class="ohtani-message-container">'
             chat_html += '<div class="ohtani-avatar">🐶</div>'
             chat_html += f'<div class="ohtani-message">{safe_message}</div>'
             chat_html += '</div>'
-            chat_html += f'<div class="timestamp">{timestamp}</div>'
-            if method_info and msg.get("method") != '初期メッセージ':
+            # 検索方法を時間の前に表示
+            if msg.get("method") and msg.get("method") != '初期メッセージ':
                 chat_html += f'<div class="system-message">{html.escape(str(msg.get("method", "")))}</div>'
+            chat_html += f'<div class="timestamp">{timestamp}</div>'
         elif msg['type'] == 'system':
             chat_html += f'<div class="system-message">{msg["message"]}</div>'
         elif msg['type'] == 'typing':
