@@ -653,8 +653,8 @@ class OhtaniChatRAG:
                 'night': ['おやすみなさい！', 'おやすみ！良い夢を']
             },
             'starters': ['そうですね', 'うーん', 'あー', 'そうそう', 'なるほど', '実は'],
-            'endings': ['です！', 'ですね', 'と思います', 'かな', 'よ', 'かもしれません'],
-            'reactions': ['それはいいですね！', 'わかります！', 'そうなんです', 'なるほど！'],
+            'endings': ['です', 'ですね', 'と思います', 'かな', 'かもしれません'],
+            'reactions': ['それはいいですね', 'わかります', 'そうなんです', 'なるほど'],
             'emotions': ['嬉しいです', '楽しいですね', 'ありがたいです', '感謝しています'],
             'casual': ['はい', 'そう', 'うん', 'なるほど', 'わかりました', 'そうかも']
         }
@@ -663,8 +663,8 @@ class OhtaniChatRAG:
         """チャット特有のパターン"""
         return {
             'quick_responses': [
-                'そうなんです！', 'ありがとうございます！', 'なるほど！', 
-                'わかります！', 'その通りです！', 'いいですね！'
+                'そうなんです', 'ありがとうございます', 'なるほど', 
+                'わかります', 'その通りです', 'いいですね'
             ],
             'thinking': ['うーん...', 'そうですね...', 'どうでしょう...'],
             'agreement': ['はい！', 'そうです！', 'その通り！', '同感です！'],
@@ -682,18 +682,23 @@ class OhtaniChatRAG:
         if self._is_short_response(query):
             return self._handle_short_response(query)
         
-        # 通常のRAG検索
-        threshold = 0.05  # 閾値を適度に調整
+        # 意味ベースRAG検索
+        threshold = 0.08  # 文脈重視のため閾値を上げる
         
-        # 1. 完全一致・高類似度優先検索
+        # 1. 意味ベース検索
         best_match = self._find_best_match(query, threshold)
         if best_match is not None:
             idx, score, method = best_match
+            
+            # 文脈一致度に基づいてAI生成の必要性を判定
+            needs_ai = score < 0.6 or '意味ベース検索(medium)' in method
+            
             return {
                 'method': method,
                 'response': self._make_chat_friendly(self.answers[idx]),
                 'confidence': 'high' if score > 0.7 else 'medium',
-                'needs_ai': False
+                'needs_ai': needs_ai and bool(ai_provider and api_key),
+                'ai_context': self._prepare_enhanced_ai_context(query, self.answers[idx]) if needs_ai else None
             }
         
         # キーワード検索
@@ -782,54 +787,187 @@ class OhtaniChatRAG:
         return response
     
     def _find_best_match(self, query: str, threshold: float):
-        """最適なマッチを見つける（完全一致優先）"""
+        """意味ベース検索（文脈理解）"""
         query_clean = re.sub(r'[。、！？\s]+', '', query.lower())
         
         # 1. 完全一致・高類似度検索
         for i, question in enumerate(self.questions):
             question_clean = re.sub(r'[。、！？\s]+', '', question.lower())
-            
-            # 文字列類似度計算（編集距離ベース）
             similarity = self._string_similarity(query_clean, question_clean)
             
-            # 90%以上の類似度なら最優先
             if similarity >= 0.9:
                 return (i, similarity, '完全一致検索')
-            
-            # 80%以上なら高優先
             elif similarity >= 0.8:
                 return (i, similarity, '高類似度検索')
         
-        # 2. TF-IDF検索（範囲拡大・補正）
-        tfidf_results = self.tfidf_search.search(query, top_k=15)  # 範囲拡大
+        # 2. 意味ベース検索
+        semantic_match = self._semantic_search(query, threshold)
+        if semantic_match:
+            return semantic_match
+        
+        return None
+    
+    def _semantic_search(self, query: str, threshold: float):
+        """意味ベース検索（文脈重視）"""
+        # 文脈カテゴリを判定
+        query_context = self._detect_context(query)
+        
+        # TF-IDF検索結果を取得
+        tfidf_results = self.tfidf_search.search(query, top_k=10)
+        
         best_match = None
         best_score = 0
         
-        # 上位15件を詳細チェック
-        for idx, score in tfidf_results[:15]:
-            if score >= threshold:
-                question = self.questions[idx]
+        for idx, tfidf_score in tfidf_results:
+            if tfidf_score < threshold:
+                continue
                 
-                # 文字列類似度も考慮
-                question_clean = re.sub(r'[。、！？\s]+', '', question.lower())
-                string_sim = self._string_similarity(query_clean, question_clean)
-                
-                # キーワード重複度
-                query_keywords = set(re.findall(r'[\w\u3040-\u309f\u30a0-\u30ff\u4e00-\u9fff]+', query.lower()))
-                question_keywords = set(re.findall(r'[\w\u3040-\u309f\u30a0-\u30ff\u4e00-\u9fff]+', question.lower()))
-                keyword_overlap = len(query_keywords & question_keywords) / max(len(query_keywords), 1)
-                
-                # 総合スコア（TF-IDF + 文字列類似度 + キーワード重複）
-                combined_score = score * 0.4 + string_sim * 0.4 + keyword_overlap * 0.2
-                
-                if combined_score > best_score:
-                    best_score = combined_score
-                    best_match = idx
+            question = self.questions[idx]
+            question_context = self._detect_context(question)
+            
+            # 文脈一致度を計算
+            context_match = self._calculate_context_similarity(query_context, question_context)
+            
+            # 意味的類似度を計算
+            semantic_score = self._calculate_semantic_similarity(query, question)
+            
+            # 総合スコア（文脈重視）
+            combined_score = (
+                tfidf_score * 0.3 +           # TF-IDF（基本類似度）
+                context_match * 0.4 +         # 文脈一致度（最重要）
+                semantic_score * 0.3          # 意味類似度
+            )
+            
+            # 文脈が大きく異なる場合は除外
+            if context_match < 0.3:
+                combined_score *= 0.5  # 大幅減点
+            
+            if combined_score > best_score and combined_score > 0.4:
+                best_score = combined_score
+                best_match = idx
         
-        if best_match is not None and best_score > 0.3:
-            return (best_match, best_score, 'TF-IDF検索')
+        if best_match is not None:
+            confidence = 'high' if best_score > 0.7 else 'medium'
+            return (best_match, best_score, f'意味ベース検索({confidence})')
         
         return None
+    
+    def _detect_context(self, text: str) -> Dict[str, float]:
+        """文脈カテゴリを検出"""
+        contexts = {
+            'baseball': 0.0,      # 野球関連
+            'business': 0.0,      # ビジネス関連
+            'personal': 0.0,      # 個人的な話
+            'training': 0.0,      # トレーニング・練習
+            'media': 0.0,         # メディア・記者対応
+            'future': 0.0,        # 将来・目標
+            'daily': 0.0          # 日常会話
+        }
+        
+        text_lower = text.lower()
+        
+        # 野球関連キーワード
+        baseball_keywords = ['野球', 'ピッチャー', '投手', 'バッター', '打者', 'バッティング', '打撃', 
+                           'ピッチング', '投球', 'ホームラン', '試合', 'チーム', 'シーズン', 'キャンプ',
+                           'リハビリ', 'ブルペン', 'マウンド', 'ベンチ', 'コーチ', '監督', 'メジャー']
+        
+        # ビジネス関連キーワード  
+        business_keywords = ['会社', '企業', 'ビジネス', '仕事', '経営', '売上', '利益', '戦略',
+                           '組織', 'チーム', '目標', '成果', 'プロジェクト', '会議', '提案']
+        
+        # 個人的な話キーワード
+        personal_keywords = ['家族', '友人', '趣味', '好き', '嫌い', '感じ', '思う', '考え',
+                           '食べ物', '映画', '音楽', '本', '休日', 'プライベート']
+        
+        # トレーニング関連キーワード
+        training_keywords = ['練習', 'トレーニング', '準備', '鍛える', '体力', '筋力', 'コンディション',
+                           '調整', 'メンテナンス', 'ケア', '回復']
+        
+        # メディア関連キーワード
+        media_keywords = ['記者', 'インタビュー', '取材', '質問', '答える', '話す', 'コメント',
+                        '発言', '報道', 'メディア']
+        
+        # 将来・目標関連キーワード
+        future_keywords = ['将来', '未来', '目標', '夢', '計画', '予定', '希望', '期待',
+                         '向けて', '目指す', 'について']
+        
+        # 日常会話キーワード
+        daily_keywords = ['今日', '最近', '調子', '元気', '疲れ', '忙しい', '時間', '天気']
+        
+        # 各カテゴリのスコア計算
+        for keyword in baseball_keywords:
+            if keyword in text_lower:
+                contexts['baseball'] += 1.0
+        
+        for keyword in business_keywords:
+            if keyword in text_lower:
+                contexts['business'] += 1.0
+        
+        for keyword in personal_keywords:
+            if keyword in text_lower:
+                contexts['personal'] += 1.0
+                
+        for keyword in training_keywords:
+            if keyword in text_lower:
+                contexts['training'] += 1.0
+                
+        for keyword in media_keywords:
+            if keyword in text_lower:
+                contexts['media'] += 1.0
+                
+        for keyword in future_keywords:
+            if keyword in text_lower:
+                contexts['future'] += 1.0
+                
+        for keyword in daily_keywords:
+            if keyword in text_lower:
+                contexts['daily'] += 1.0
+        
+        # 正規化
+        total = sum(contexts.values())
+        if total > 0:
+            for key in contexts:
+                contexts[key] /= total
+        
+        return contexts
+    
+    def _calculate_context_similarity(self, context1: Dict[str, float], context2: Dict[str, float]) -> float:
+        """文脈の類似度を計算"""
+        similarity = 0.0
+        for key in context1:
+            similarity += min(context1[key], context2[key])
+        return similarity
+    
+    def _calculate_semantic_similarity(self, query: str, question: str) -> float:
+        """意味的類似度を計算（改良版）"""
+        # 重要な名詞・動詞を抽出
+        query_important = self._extract_important_terms(query)
+        question_important = self._extract_important_terms(question)
+        
+        if not query_important or not question_important:
+            return 0.0
+        
+        # 重要語の重複度
+        common_terms = len(query_important & question_important)
+        total_terms = len(query_important | question_important)
+        
+        return common_terms / total_terms if total_terms > 0 else 0.0
+    
+    def _extract_important_terms(self, text: str) -> set:
+        """重要な語句を抽出"""
+        # 助詞・助動詞・一般的すぎる語を除外
+        stopwords = {'は', 'が', 'を', 'に', 'で', 'と', 'も', 'から', 'まで', 'の', 'な', 'だ', 'である',
+                    'です', 'ます', 'する', 'した', 'している', 'いる', 'ある', 'ない', 'こと', 'もの',
+                    'どう', 'どの', 'どこ', 'いつ', 'なぜ', 'なに', '何', 'どれ'}
+        
+        terms = set()
+        tokens = re.findall(r'[\w\u3040-\u309f\u30a0-\u30ff\u4e00-\u9fff]+', text.lower())
+        
+        for token in tokens:
+            if len(token) > 1 and token not in stopwords:
+                terms.add(token)
+        
+        return terms
     
     def _string_similarity(self, s1: str, s2: str) -> float:
         """文字列類似度計算（簡易版編集距離）"""
@@ -857,8 +995,8 @@ class OhtaniChatRAG:
         ending = random.choice(self.ohtani_patterns['endings'])
         
         templates = [
-            f"{starter}、それは面白い質問ですね！",
-            f"いい質問{ending}！",
+            f"{starter}、それは面白い質問ですね",
+            f"いい質問{ending}",
             f"{starter}、そのことについて考えてみますね",
             f"なるほど、{query}について{ending}",
         ]
@@ -898,6 +1036,30 @@ class OhtaniChatRAG:
 質問: {query}
 
 大谷翔平として自然に返答:"""
+    
+    def _prepare_enhanced_ai_context(self, query: str, rag_answer: str) -> str:
+        """RAG回答を参考にした強化版AI生成コンテキスト"""
+        return f"""
+あなたは大谷翔平選手として、記者に対応するときと同じような感じで回答してください。
+
+【参考情報】
+以下は類似質問への回答例です。参考にしつつ、今回の質問により適した回答をしてください：
+「{rag_answer}」
+
+【回答の特徴】
+- 絵文字は使わない（日本語の自然な表現で）
+- 70-120文字程度
+- 大谷翔平選手らしい謙虚で丁寧な口調
+- 文脈を理解した適切な回答
+
+【注意事項】
+- 参考情報と質問の文脈が異なる場合は、参考情報にとらわれず質問に直接答える
+- 野球以外の質問（ビジネス等）には一般的な視点で答える
+- 「〜かなと思います」「〜という感じです」の文末パターンを使う
+
+質問: {query}
+
+大谷翔平として適切に返答:"""
 
 # AI API呼び出し（チャット用）
 def call_ai_for_chat(context: str, ai_provider: str, api_key: str) -> Optional[str]:
@@ -1059,13 +1221,13 @@ def show_chat_page():
     
     # ヘッダーHTML
     header_html = textwrap.dedent('''
-    <div class="chat-header">
-        AI大谷とチャット
-        <div class="status-indicator">
-            <div class="online-dot"></div>
-            オンライン
+        <div class="chat-header">
+            AI大谷とチャット
+            <div class="status-indicator">
+                <div class="online-dot"></div>
+                オンライン
+            </div>
         </div>
-    </div>
     ''')
     
     # サイドバー（設定）
@@ -1197,17 +1359,17 @@ def show_chat_page():
         
         # タイピング表示（同じプレースホルダを更新）
         typing_inner = textwrap.dedent('''
-        <div class="typing-container">
-            <div class="ohtani-avatar">🐶</div>
-            <div class="typing-indicator">
-                大谷選手が入力中
-                <div class="typing-dots">
-                    <div class="typing-dot"></div>
-                    <div class="typing-dot"></div>
-                    <div class="typing-dot"></div>
+            <div class="typing-container">
+                <div class="ohtani-avatar">🐶</div>
+                <div class="typing-indicator">
+                    大谷選手が入力中
+                    <div class="typing-dots">
+                        <div class="typing-dot"></div>
+                        <div class="typing-dot"></div>
+                        <div class="typing-dot"></div>
+                    </div>
                 </div>
             </div>
-        </div>
         ''')
         body_html = display_chat_messages()
         if body_html.strip().endswith('</div>'):
