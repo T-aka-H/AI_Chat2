@@ -663,39 +663,17 @@ class OhtaniChatRAG:
             return self._handle_short_response(query)
         
         # 通常のRAG検索
-        threshold = 0.03  # さらに低い閾値でRAGを最優先
+        threshold = 0.05  # 閾値を適度に調整
         
-        # TF-IDF検索（複数候補から最適解を選択）
-        tfidf_results = self.tfidf_search.search(query, top_k=10)
-        best_match = None
-        best_score = 0
-        
-        # 複数の候補から最も適切な回答を選択
-        for idx, score in tfidf_results[:5]:  # 上位5件をチェック
-            if score >= threshold:
-                question = self.questions[idx]
-                answer = self.answers[idx]
-                
-                # 質問の長さと内容の関連性を考慮
-                query_keywords = set(re.findall(r'[\w\u3040-\u309f\u30a0-\u30ff\u4e00-\u9fff]+', query.lower()))
-                question_keywords = set(re.findall(r'[\w\u3040-\u309f\u30a0-\u30ff\u4e00-\u9fff]+', question.lower()))
-                
-                # キーワード重複度を計算
-                keyword_overlap = len(query_keywords & question_keywords) / max(len(query_keywords), 1)
-                
-                # 総合スコア（TF-IDF + キーワード重複）
-                combined_score = score * 0.7 + keyword_overlap * 0.3
-                
-                if combined_score > best_score:
-                    best_score = combined_score
-                    best_match = idx
-        
+        # 1. 完全一致・高類似度優先検索
+        best_match = self._find_best_match(query, threshold)
         if best_match is not None:
+            idx, score, method = best_match
             return {
-                'method': 'RAG検索',
-                'response': self._make_chat_friendly(self.answers[best_match]),
-                'confidence': 'high' if best_score > 0.3 else 'medium',
-                'needs_ai': False  # RAGがあればAI生成はしない
+                'method': method,
+                'response': self._make_chat_friendly(self.answers[idx]),
+                'confidence': 'high' if score > 0.7 else 'medium',
+                'needs_ai': False
             }
         
         # キーワード検索
@@ -772,17 +750,86 @@ class OhtaniChatRAG:
         }
     
     def _make_chat_friendly(self, response: str) -> str:
-        """回答をチャット向けにフレンドリーに"""
+        """回答を大谷選手らしい記者対応風に調整"""
         # 長い文を短縮
-        if len(response) > 100:
+        if len(response) > 120:
             sentences = response.split('。')
             response = sentences[0] + '。'
         
-        # より親しみやすい表現に
-        response = response.replace('と思います', 'と思いますよ')
-        response = response.replace('ですね', 'ですね！')
+        # 大谷選手の記者対応らしい表現に調整（「よ」は削除）
+        # 基本的にはRAGデータそのままを尊重
         
         return response
+    
+    def _find_best_match(self, query: str, threshold: float):
+        """最適なマッチを見つける（完全一致優先）"""
+        query_clean = re.sub(r'[。、！？\s]+', '', query.lower())
+        
+        # 1. 完全一致・高類似度検索
+        for i, question in enumerate(self.questions):
+            question_clean = re.sub(r'[。、！？\s]+', '', question.lower())
+            
+            # 文字列類似度計算（編集距離ベース）
+            similarity = self._string_similarity(query_clean, question_clean)
+            
+            # 90%以上の類似度なら最優先
+            if similarity >= 0.9:
+                return (i, similarity, '完全一致検索')
+            
+            # 80%以上なら高優先
+            elif similarity >= 0.8:
+                return (i, similarity, '高類似度検索')
+        
+        # 2. TF-IDF検索（範囲拡大・補正）
+        tfidf_results = self.tfidf_search.search(query, top_k=15)  # 範囲拡大
+        best_match = None
+        best_score = 0
+        
+        # 上位15件を詳細チェック
+        for idx, score in tfidf_results[:15]:
+            if score >= threshold:
+                question = self.questions[idx]
+                
+                # 文字列類似度も考慮
+                question_clean = re.sub(r'[。、！？\s]+', '', question.lower())
+                string_sim = self._string_similarity(query_clean, question_clean)
+                
+                # キーワード重複度
+                query_keywords = set(re.findall(r'[\w\u3040-\u309f\u30a0-\u30ff\u4e00-\u9fff]+', query.lower()))
+                question_keywords = set(re.findall(r'[\w\u3040-\u309f\u30a0-\u30ff\u4e00-\u9fff]+', question.lower()))
+                keyword_overlap = len(query_keywords & question_keywords) / max(len(query_keywords), 1)
+                
+                # 総合スコア（TF-IDF + 文字列類似度 + キーワード重複）
+                combined_score = score * 0.4 + string_sim * 0.4 + keyword_overlap * 0.2
+                
+                if combined_score > best_score:
+                    best_score = combined_score
+                    best_match = idx
+        
+        if best_match is not None and best_score > 0.3:
+            return (best_match, best_score, 'TF-IDF検索')
+        
+        return None
+    
+    def _string_similarity(self, s1: str, s2: str) -> float:
+        """文字列類似度計算（簡易版編集距離）"""
+        if not s1 or not s2:
+            return 0.0
+        
+        # 長い方を基準にする
+        longer = s1 if len(s1) > len(s2) else s2
+        shorter = s2 if len(s1) > len(s2) else s1
+        
+        if len(longer) == 0:
+            return 1.0
+        
+        # 共通部分文字列の長さを計算
+        common_chars = 0
+        for char in shorter:
+            if char in longer:
+                common_chars += 1
+        
+        return common_chars / len(longer)
     
     def _generate_chat_response(self, query: str) -> str:
         """チャット向けパターン生成"""
@@ -879,7 +926,7 @@ def initialize_chat():
         # 最初の挨拶メッセージ
         st.session_state.chat_history.append({
             'type': 'ohtani',
-            'message': 'こんにちは！大谷翔平です。何でも気軽に話しかけてくださいね！⚾',
+            'message': 'AI大谷です。チャットしなかったらしなかったで、みなさんうるさいですし、聞きたいことがあれば聞きます。',
             'timestamp': datetime.now().strftime('%H:%M'),
             'method': '初期メッセージ'
         })
