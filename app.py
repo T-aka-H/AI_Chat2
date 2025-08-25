@@ -376,11 +376,34 @@ class LightweightTextSearch:
         self.idf_vector = self._compute_idf()
     
     def _tokenize(self, text: str) -> List[str]:
-        """日本語対応トークナイズ"""
+        """日本語対応トークナイズ（改良版）"""
         if not isinstance(text, str):
             return []
+        
+        # 基本トークン化
         tokens = re.findall(r'[\w\u3040-\u309f\u30a0-\u30ff\u4e00-\u9fff]+', text.lower())
-        return [token for token in tokens if len(token) > 1]
+        
+        # 重要キーワードの抽出と正規化
+        normalized_tokens = []
+        for token in tokens:
+            if len(token) > 1:
+                # 野球関連用語の正規化
+                if '打撃' in token or 'バッティング' in token or '打席' in token:
+                    normalized_tokens.extend(['打撃', 'バッティング', '打席'])
+                elif '投球' in token or 'ピッチング' in token or '投手' in token:
+                    normalized_tokens.extend(['投球', 'ピッチング', '投手'])
+                elif '練習' in token or 'トレーニング' in token:
+                    normalized_tokens.extend(['練習', 'トレーニング'])
+                elif '初回' in token or '初めて' in token or 'はじめて' in token:
+                    normalized_tokens.extend(['初回', '初めて', 'はじめて'])
+                elif '屋外' in token or '外' in token or '野外' in token:
+                    normalized_tokens.extend(['屋外', '外', '野外'])
+                elif '感想' in token or '感じ' in token or 'どう' in token:
+                    normalized_tokens.extend(['感想', '感じ', 'どう'])
+                else:
+                    normalized_tokens.append(token)
+        
+        return list(set(normalized_tokens))  # 重複除去
     
     def _build_vocabulary(self) -> Dict[str, int]:
         """語彙辞書構築"""
@@ -640,16 +663,38 @@ class OhtaniChatRAG:
             return self._handle_short_response(query)
         
         # 通常のRAG検索
-        threshold = 0.05  # より低い閾値でRAGを優先
+        threshold = 0.03  # さらに低い閾値でRAGを最優先
         
-        # TF-IDF検索
-        tfidf_results = self.tfidf_search.search(query, top_k=5)
-        if tfidf_results and tfidf_results[0][1] >= threshold:
-            idx, score = tfidf_results[0]
+        # TF-IDF検索（複数候補から最適解を選択）
+        tfidf_results = self.tfidf_search.search(query, top_k=10)
+        best_match = None
+        best_score = 0
+        
+        # 複数の候補から最も適切な回答を選択
+        for idx, score in tfidf_results[:5]:  # 上位5件をチェック
+            if score >= threshold:
+                question = self.questions[idx]
+                answer = self.answers[idx]
+                
+                # 質問の長さと内容の関連性を考慮
+                query_keywords = set(re.findall(r'[\w\u3040-\u309f\u30a0-\u30ff\u4e00-\u9fff]+', query.lower()))
+                question_keywords = set(re.findall(r'[\w\u3040-\u309f\u30a0-\u30ff\u4e00-\u9fff]+', question.lower()))
+                
+                # キーワード重複度を計算
+                keyword_overlap = len(query_keywords & question_keywords) / max(len(query_keywords), 1)
+                
+                # 総合スコア（TF-IDF + キーワード重複）
+                combined_score = score * 0.7 + keyword_overlap * 0.3
+                
+                if combined_score > best_score:
+                    best_score = combined_score
+                    best_match = idx
+        
+        if best_match is not None:
             return {
                 'method': 'RAG検索',
-                'response': self._make_chat_friendly(self.answers[idx]),
-                'confidence': 'high' if score > 0.2 else 'medium',
+                'response': self._make_chat_friendly(self.answers[best_match]),
+                'confidence': 'high' if best_score > 0.3 else 'medium',
                 'needs_ai': False  # RAGがあればAI生成はしない
             }
         
