@@ -12,6 +12,23 @@ import time
 import requests
 from datetime import datetime
 
+# ページナビゲーション（簡易版）
+def show_page_navigation() -> str:
+    """現在はチャットページ固定で返す。必要ならタブやラジオUIに拡張可。"""
+    return 'chat'
+
+def show_home_page():
+    """ホームページ（現状はチャットページに委譲）。"""
+    show_chat_page()
+
+def show_extraction_page():
+    """抽出ページのプレースホルダー。"""
+    st.markdown("### 抽出ページ\n準備中です。左のチャット設定からAIキーを設定して会話をお試しください。")
+
+def show_settings_page():
+    """設定ページのプレースホルダー。"""
+    st.markdown("### 設定\nサイドバーの『チャット設定』でAIプロバイダとAPIキーを設定してください。")
+
 # 設定
 st.set_page_config(
     page_title="💬 大谷翔平チャット",
