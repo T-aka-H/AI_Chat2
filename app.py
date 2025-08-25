@@ -341,6 +341,26 @@ def load_css():
         box-shadow: 0 4px 12px rgba(14, 165, 164, 0.3) !important;
     }
     
+    /* サイドバーのグレーボタン */
+    .stButton > button[data-testid*="clear_history"], 
+    .stButton > button[data-testid*="page_refresh"] {
+        background: #6b7280 !important;
+        color: white !important;
+        border: none !important;
+        border-radius: 8px !important;
+        padding: 8px 16px !important;
+        font-size: 14px !important;
+        font-weight: 400 !important;
+        width: 100% !important;
+    }
+    
+    .stButton > button[data-testid*="clear_history"]:hover, 
+    .stButton > button[data-testid*="page_refresh"]:hover {
+        background: #4b5563 !important;
+        transform: none !important;
+        box-shadow: none !important;
+    }
+    
     /* サイドバー非表示 */
     .css-1d391kg {
         display: none;
@@ -1072,17 +1092,6 @@ def show_chat_page():
         
         st.divider()
         
-        # チャット操作
-        if st.button("🗑️ チャット履歴をクリア"):
-            st.session_state.chat_history = []
-            initialize_chat()
-            st.rerun()
-        
-        if st.button("🔄 ページ更新"):
-            st.rerun()
-        
-        st.divider()
-        
         # 統計情報
         total_messages = len(st.session_state.chat_history)
         user_messages = len([m for m in st.session_state.chat_history if m['type'] == 'user'])
@@ -1121,6 +1130,21 @@ def show_chat_page():
             - 安定した返答
             - APIキー不要
             """)
+        
+        # 一番下にチャット操作ボタン（グレー）
+        st.markdown("---")
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            if st.button("履歴クリア", key="clear_history", help="チャット履歴をクリア"):
+                st.session_state.chat_history = []
+                initialize_chat()
+                st.rerun()
+        
+        with col2:
+            if st.button("ページ更新", key="page_refresh", help="ページを更新"):
+                st.rerun()
     
     # RAGシステム初期化
     @st.cache_resource
